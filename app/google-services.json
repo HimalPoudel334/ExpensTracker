@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1011943572355",
+    "project_id": "expense-tracker-d2cac",
+    "storage_bucket": "expense-tracker-d2cac.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1011943572355:android:2122af4ccdfe2ad482acb6",
+        "android_client_info": {
+          "package_name": "com.roomies.expensetracker"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCid8lfdzH329XzJdGZtxQ-MdWqg1N3bxI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
