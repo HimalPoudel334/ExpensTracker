@@ -14,12 +14,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ElevatedCard
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -38,6 +39,10 @@ import com.roomies.expensetracker.model.Expense
 import com.roomies.expensetracker.util.Constants
 import com.roomies.expensetracker.util.DateUtils
 import com.roomies.expensetracker.viewmodel.MainViewModel
+import dev.shivathapaa.nepalidatepickerkmp.NepaliDatePicker
+import dev.shivathapaa.nepalidatepickerkmp.NepaliDatePickerDialog
+import dev.shivathapaa.nepalidatepickerkmp.calendar_model.NepaliDatePickerDefaults
+import dev.shivathapaa.nepalidatepickerkmp.rememberNepaliDatePickerState
 
 @Composable
 fun ExpensesListScreen(viewModel: MainViewModel) {
@@ -112,7 +117,6 @@ fun ExpenseRow(expense: Expense, onClick: () -> Unit) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditExpenseDialog(expense: Expense, viewModel: MainViewModel, onDismiss: () -> Unit) {
     val settings by viewModel.settings.collectAsState()
@@ -122,6 +126,8 @@ fun EditExpenseDialog(expense: Expense, viewModel: MainViewModel, onDismiss: () 
     var paymentMethod by remember { mutableStateOf(expense.paymentMethod) }
     var paidBy by remember { mutableStateOf(expense.paidBy) }
     var notes by remember { mutableStateOf(expense.notes) }
+    var selectedDateMillis by remember { mutableStateOf(expense.dateMillis) }
+    var showDatePicker by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -140,6 +146,23 @@ fun EditExpenseDialog(expense: Expense, viewModel: MainViewModel, onDismiss: () 
                     onValueChange = { item = it },
                     label = { Text("Item") },
                     modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = DateUtils.formatNepali(selectedDateMillis),
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Date (BS)") },
+                    trailingIcon = {
+                        IconButton(onClick = { showDatePicker = true }) {
+                            Icon(Icons.Filled.DateRange, contentDescription = "Pick date")
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    "AD: ${DateUtils.formatDate(selectedDateMillis)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 DropdownField("Category", Constants.CATEGORIES, category) { category = it }
                 DropdownField("Payment Method", Constants.PAYMENT_METHODS, paymentMethod) { paymentMethod = it }
@@ -172,6 +195,7 @@ fun EditExpenseDialog(expense: Expense, viewModel: MainViewModel, onDismiss: () 
                                 category = category,
                                 paymentMethod = paymentMethod,
                                 paidBy = paidBy,
+                                dateMillis = selectedDateMillis,
                                 notes = notes.trim()
                             )
                         )
@@ -186,4 +210,34 @@ fun EditExpenseDialog(expense: Expense, viewModel: MainViewModel, onDismiss: () 
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
+
+    if (showDatePicker) {
+        val nepaliDatePickerState = rememberNepaliDatePickerState(
+            initialSelectedDate = DateUtils.toNepaliSimpleDate(selectedDateMillis)
+        )
+        NepaliDatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                NepaliDatePickerDefaults.DialogButton(
+                    text = "OK",
+                    onButtonClick = {
+                        nepaliDatePickerState.selectedEnglishDate?.let { english ->
+                            selectedDateMillis = DateUtils.fromEnglishCustomCalendar(
+                                english.year, english.month, english.dayOfMonth
+                            )
+                        }
+                        showDatePicker = false
+                    }
+                )
+            },
+            dismissButton = {
+                NepaliDatePickerDefaults.DialogButton(
+                    text = "Cancel",
+                    onButtonClick = { showDatePicker = false }
+                )
+            }
+        ) {
+            NepaliDatePicker(state = nepaliDatePickerState)
+        }
+    }
 }

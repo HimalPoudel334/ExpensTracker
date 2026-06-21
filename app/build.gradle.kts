@@ -60,4 +60,6 @@ dependencies {
     implementation(libs.firebase.firestore)
     implementation(libs.kotlinx.coroutines.play.services)
 
+    implementation(libs.nepali.date.picker.ui)
+
 }

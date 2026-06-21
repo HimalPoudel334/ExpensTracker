@@ -73,3 +73,50 @@ fun StatCard(title: String, value: String) {
         }
     }
 }
+
+/**
+ * Editable text field that shows matching previously-used values as you type.
+ * Used for the Item field so "Jar Water" and "Water Jar" don't end up as two
+ * different items in the reports.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AutocompleteTextField(
+    label: String,
+    value: String,
+    suggestions: List<String>,
+    onValueChange: (String) -> Unit,
+    onSuggestionSelected: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(
+        expanded = expanded && suggestions.isNotEmpty(),
+        onExpandedChange = { expanded = it }
+    ) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {
+                onValueChange(it)
+                expanded = true
+            },
+            label = { Text(label) },
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth()
+        )
+        ExposedDropdownMenu(
+            expanded = expanded && suggestions.isNotEmpty(),
+            onDismissRequest = { expanded = false }
+        ) {
+            suggestions.forEach { suggestion ->
+                DropdownMenuItem(
+                    text = { Text(suggestion) },
+                    onClick = {
+                        onSuggestionSelected(suggestion)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}

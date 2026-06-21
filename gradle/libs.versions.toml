@@ -12,6 +12,7 @@ kotlin = "2.4.0"
 composeBom = "2026.06.00"
 lifecycleViewmodelCompose = "2.11.0"
 navigationCompose = "2.9.8"
+nepaliDatePicker = "3.0.0"
 
 [libraries]
 androidx-compose-material-icons-extended = { module = "androidx.compose.material:material-icons-extended" }
@@ -35,6 +36,7 @@ androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-
 androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
 kotlinx-coroutines-play-services = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-play-services", version.ref = "kotlinxCoroutinesPlayServices" }
+nepali-date-picker-ui = { module = "io.github.shivathapaa:nepali-date-picker-ui", version.ref = "nepaliDatePicker" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

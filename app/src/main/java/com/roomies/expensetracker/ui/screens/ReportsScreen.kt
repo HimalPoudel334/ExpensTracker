@@ -26,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -37,6 +38,7 @@ import androidx.core.content.FileProvider
 import com.roomies.expensetracker.model.Expense
 import com.roomies.expensetracker.util.CsvExporter
 import com.roomies.expensetracker.util.DateUtils
+import com.roomies.expensetracker.util.DeviceConfig
 import com.roomies.expensetracker.viewmodel.MainViewModel
 
 @Composable
@@ -46,7 +48,7 @@ fun ReportsScreen(viewModel: MainViewModel) {
     // collecting this keeps the screen recomposing whenever expenses change
     val expenseUpdates by viewModel.expenses.collectAsState()
 
-    var refMillis by remember { mutableStateOf(System.currentTimeMillis()) }
+    var refMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
     val total = viewModel.totalForMonth(refMillis)
     val byPerson = viewModel.byPersonForMonth(refMillis)
@@ -54,6 +56,8 @@ fun ReportsScreen(viewModel: MainViewModel) {
     val topByAmount = viewModel.topItemsByAmount(refMillis)
     val topByFrequency = viewModel.topItemsByFrequency(refMillis)
     val (aPaid, bPaid, settlementMsg) = viewModel.settlementForMonth(refMillis)
+
+    val isMyDevice = DeviceConfig.isMyDevice(context)
 
     Column(
         modifier = Modifier
@@ -99,11 +103,21 @@ fun ReportsScreen(viewModel: MainViewModel) {
         }
 
         HorizontalDivider()
-        Text("Settlement (assumes 50/50 split)", style = MaterialTheme.typography.titleMedium)
+        if (isMyDevice) {
+            Text(
+                "Settlement (assumes 50/50 split)",
+                style = MaterialTheme.typography.titleMedium
+            )
+        }
         ReportRow(settings.personAName, "${settings.currencySymbol} ${"%.2f".format(aPaid)} paid")
         ReportRow(settings.personBName, "${settings.currencySymbol} ${"%.2f".format(bPaid)} paid")
-        Text(settlementMsg, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
-
+        if (isMyDevice) {
+            Text(
+                settlementMsg,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
         Spacer(modifier = Modifier.height(8.dp))
         Button(
             onClick = { exportAndShareCsv(context, viewModel.expensesForMonth(refMillis), refMillis) },

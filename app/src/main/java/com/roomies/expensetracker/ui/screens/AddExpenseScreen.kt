@@ -8,7 +8,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -16,21 +20,32 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.roomies.expensetracker.model.Expense
 import com.roomies.expensetracker.util.Constants
+import com.roomies.expensetracker.util.DateUtils
+import com.roomies.expensetracker.util.DeviceConfig
 import com.roomies.expensetracker.viewmodel.MainViewModel
+import dev.shivathapaa.nepalidatepickerkmp.NepaliDatePicker
+import dev.shivathapaa.nepalidatepickerkmp.NepaliDatePickerDialog
+import dev.shivathapaa.nepalidatepickerkmp.calendar_model.NepaliDatePickerDefaults
+import dev.shivathapaa.nepalidatepickerkmp.rememberNepaliDatePickerState
 import kotlinx.coroutines.delay
 import kotlin.time.Duration.Companion.milliseconds
 
 @Composable
 fun AddExpenseScreen(viewModel: MainViewModel) {
+    val context = LocalContext.current
+
     val settings by viewModel.settings.collectAsState()
+    val expenses by viewModel.expenses.collectAsState()
 
     var amount by remember { mutableStateOf("") }
     var item by remember { mutableStateOf("") }
@@ -38,10 +53,33 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
     var paymentMethod by remember { mutableStateOf(Constants.PAYMENT_METHODS.first()) }
     var paidBy by remember { mutableStateOf(settings.personAName) }
     var notes by remember { mutableStateOf("") }
+    var selectedDateMillis by remember { mutableLongStateOf(DateUtils.todayLocalNoon()) }
+    var showDatePicker by remember { mutableStateOf(false) }
     var showConfirmation by remember { mutableStateOf(false) }
 
-    LaunchedEffect(settings) {
-        if (paidBy.isBlank()) paidBy = settings.personAName
+    val isMyDevice = DeviceConfig.isMyDevice(context)
+
+    LaunchedEffect(settings, isMyDevice) {
+        if (paidBy.isBlank()) {
+            paidBy = if (isMyDevice) {
+                settings.personAName
+            } else {
+                settings.personBName
+            }
+        }
+    }
+
+    val itemSuggestions = remember(expenses, item) {
+        val query = item.trim()
+        if (query.isBlank()) {
+            emptyList()
+        } else {
+            expenses.map { it.item }
+                .distinctBy { it.lowercase() }
+                .filter { it.contains(query, ignoreCase = true) && !it.equals(query, ignoreCase = true) }
+                .sortedBy { it.lowercase() }
+                .take(6)
+        }
     }
 
     Column(
@@ -61,11 +99,30 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
             modifier = Modifier.fillMaxWidth()
         )
 
-        OutlinedTextField(
+        AutocompleteTextField(
+            label = "Item / Description",
             value = item,
+            suggestions = itemSuggestions,
             onValueChange = { item = it },
-            label = { Text("Item / Description") },
+            onSuggestionSelected = { item = it }
+        )
+
+        OutlinedTextField(
+            value = DateUtils.formatNepali(selectedDateMillis),
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Date (BS)") },
+            trailingIcon = {
+                IconButton(onClick = { showDatePicker = true }) {
+                    Icon(Icons.Filled.DateRange, contentDescription = "Pick date")
+                }
+            },
             modifier = Modifier.fillMaxWidth()
+        )
+        Text(
+            "AD: ${DateUtils.formatDate(selectedDateMillis)}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
         DropdownField(
@@ -82,12 +139,14 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
             onSelected = { paymentMethod = it }
         )
 
-        DropdownField(
-            label = "Paid By",
-            options = listOf(settings.personAName, settings.personBName),
-            selected = paidBy,
-            onSelected = { paidBy = it }
-        )
+        if (isMyDevice) {
+            DropdownField(
+                label = "Paid By",
+                options = listOf(settings.personAName, settings.personBName),
+                selected = paidBy,
+                onSelected = { paidBy = it }
+            )
+        }
 
         OutlinedTextField(
             value = notes,
@@ -107,12 +166,14 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
                             category = category,
                             paymentMethod = paymentMethod,
                             paidBy = paidBy,
+                            dateMillis = selectedDateMillis,
                             notes = notes.trim()
                         )
                     )
                     amount = ""
                     item = ""
                     notes = ""
+                    selectedDateMillis = DateUtils.todayLocalNoon()
                     showConfirmation = true
                 }
             },
@@ -127,6 +188,36 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
                 delay(2000.milliseconds)
                 showConfirmation = false
             }
+        }
+    }
+
+    if (showDatePicker) {
+        val nepaliDatePickerState = rememberNepaliDatePickerState(
+            initialSelectedDate = DateUtils.toNepaliSimpleDate(selectedDateMillis)
+        )
+        NepaliDatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                NepaliDatePickerDefaults.DialogButton(
+                    text = "OK",
+                    onButtonClick = {
+                        nepaliDatePickerState.selectedEnglishDate?.let { english ->
+                            selectedDateMillis = DateUtils.fromEnglishCustomCalendar(
+                                english.year, english.month, english.dayOfMonth
+                            )
+                        }
+                        showDatePicker = false
+                    }
+                )
+            },
+            dismissButton = {
+                NepaliDatePickerDefaults.DialogButton(
+                    text = "Cancel",
+                    onButtonClick = { showDatePicker = false }
+                )
+            }
+        ) {
+            NepaliDatePicker(state = nepaliDatePickerState)
         }
     }
 }

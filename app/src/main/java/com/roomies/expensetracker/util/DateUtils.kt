@@ -1,5 +1,8 @@
 package com.roomies.expensetracker.util
 
+import dev.shivathapaa.nepalidatepickerkmp.calendar_model.NepaliDateConverter
+import dev.shivathapaa.nepalidatepickerkmp.calendar_model.NepaliDatePickerDefaults
+import dev.shivathapaa.nepalidatepickerkmp.data.SimpleDate
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -41,5 +44,40 @@ object DateUtils {
         cal.set(Calendar.MINUTE, 0)
         cal.set(Calendar.SECOND, 0)
         return cal.timeInMillis
+    }
+
+    /** Today's date stored at local noon (our convention, avoids midnight edge cases). */
+    fun todayLocalNoon(): Long {
+        val now = Calendar.getInstance()
+        return toLocalNoon(now.get(Calendar.YEAR), now.get(Calendar.MONTH), now.get(Calendar.DAY_OF_MONTH))
+    }
+
+    fun toLocalNoon(year: Int, month: Int, day: Int): Long {
+        val cal = Calendar.getInstance()
+        cal.clear()
+        cal.set(year, month, day, 12, 0, 0)
+        return cal.timeInMillis
+    }
+
+    /** Our local-noon AD millis -> the library's BS SimpleDate, for initializing the picker. */
+    fun toNepaliSimpleDate(localMillis: Long): SimpleDate {
+        val cal = Calendar.getInstance().apply { timeInMillis = localMillis }
+        val nepali = NepaliDateConverter.convertEnglishToNepali(
+            cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH)
+        )
+        return SimpleDate(nepali.year, nepali.month, nepali.dayOfMonth)
+    }
+
+    /** BS year/month(1-12)/day -> our local-noon AD millis storage convention. */
+    fun fromEnglishCustomCalendar(year: Int, month: Int, day: Int): Long =
+        toLocalNoon(year, month - 1, day)
+
+    /** Formats our local-noon AD millis as a BS date string, e.g. "Asar 6, 2083". */
+    fun formatNepali(localMillis: Long): String {
+        val cal = Calendar.getInstance().apply { timeInMillis = localMillis }
+        val nepali = NepaliDateConverter.convertEnglishToNepali(
+            cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH)
+        )
+        return NepaliDateConverter.formatNepaliDate(nepali, NepaliDatePickerDefaults.DefaultLocale)
     }
 }

@@ -7,11 +7,11 @@ import com.roomies.expensetracker.data.FirestoreRepository
 import com.roomies.expensetracker.model.AppSettings
 import com.roomies.expensetracker.model.Expense
 import com.roomies.expensetracker.model.RecurringExpense
-import com.roomies.expensetracker.util.DateUtils
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import com.roomies.expensetracker.util.DateUtils
 
 class MainViewModel : ViewModel() {
 
