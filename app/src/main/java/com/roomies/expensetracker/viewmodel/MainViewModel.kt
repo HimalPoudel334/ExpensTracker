@@ -104,6 +104,10 @@ class MainViewModel : ViewModel() {
         expensesForMonth(refMillis).groupBy { it.paidBy }
             .mapValues { entry -> entry.value.sumOf { it.amount } }
 
+    fun byCategoryForMonth(refMillis: Long): Map<String, Double> =
+        expensesForMonth(refMillis).groupBy{it.category}
+            .mapValues{entry -> entry.value.sumOf {it.amount}}
+
     fun byPaymentMethodForMonth(refMillis: Long): Map<String, Double> =
         expensesForMonth(refMillis).groupBy { it.paymentMethod }
             .mapValues { entry -> entry.value.sumOf { it.amount } }

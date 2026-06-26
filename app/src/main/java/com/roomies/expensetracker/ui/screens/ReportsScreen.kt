@@ -27,7 +27,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -52,6 +51,7 @@ fun ReportsScreen(viewModel: MainViewModel) {
 
     val total = viewModel.totalForMonth(refMillis)
     val byPerson = viewModel.byPersonForMonth(refMillis)
+    val byCategory = viewModel.byCategoryForMonth(refMillis)
     val byPayment = viewModel.byPaymentMethodForMonth(refMillis)
     val topByAmount = viewModel.topItemsByAmount(refMillis)
     val topByFrequency = viewModel.topItemsByFrequency(refMillis)
@@ -82,22 +82,27 @@ fun ReportsScreen(viewModel: MainViewModel) {
 
         StatCard("Total Monthly Expenses", "${settings.currencySymbol} ${"%.2f".format(total)}")
 
-        Text("Expenses by Person", style = MaterialTheme.typography.titleMedium)
+        Text("Expenses by Person", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
         if (byPerson.isEmpty()) Text("No data") else byPerson.forEach { (person, amt) ->
             ReportRow(person, "${settings.currencySymbol} ${"%.2f".format(amt)}")
         }
 
-        Text("Expenses by Payment Method", style = MaterialTheme.typography.titleMedium)
+        Text("Expenses by Category", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+        if (byPerson.isEmpty()) Text("No data") else byCategory.forEach { (category, amt) ->
+            ReportRow(category, "${settings.currencySymbol} ${"%.2f".format(amt)}")
+        }
+
+        Text("Expenses by Payment Method", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
         if (byPayment.isEmpty()) Text("No data") else byPayment.forEach { (method, amt) ->
             ReportRow(method, "${settings.currencySymbol} ${"%.2f".format(amt)}")
         }
 
-        Text("Most Expended Items (by amount)", style = MaterialTheme.typography.titleMedium)
+        Text("Most Expended Items (by amount)", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
         if (topByAmount.isEmpty()) Text("No data") else topByAmount.forEach { (item, amt) ->
             ReportRow(item, "${settings.currencySymbol} ${"%.2f".format(amt)}")
         }
 
-        Text("Most Frequently Bought Items", style = MaterialTheme.typography.titleMedium)
+        Text("Most Frequently Bought Items", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
         if (topByFrequency.isEmpty()) Text("No data") else topByFrequency.forEach { (item, count) ->
             ReportRow(item, "$count time(s)")
         }
@@ -106,7 +111,7 @@ fun ReportsScreen(viewModel: MainViewModel) {
         if (isMyDevice) {
             Text(
                 "Settlement (assumes 50/50 split)",
-                style = MaterialTheme.typography.titleMedium
+                style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary
             )
         }
         ReportRow(settings.personAName, "${settings.currencySymbol} ${"%.2f".format(aPaid)} paid")
