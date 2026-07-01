@@ -110,7 +110,9 @@ fun ExpenseRow(expense: Expense, onClick: () -> Unit) {
                     "${expense.category} \u2022 ${expense.paymentMethod} \u2022 ${expense.paidBy}",
                     style = MaterialTheme.typography.bodySmall
                 )
-                Text(DateUtils.formatDate(expense.dateMillis), style = MaterialTheme.typography.bodySmall)
+                Text(DateUtils.formatNepali(expense.dateMillis), style = MaterialTheme.typography.bodySmall)
+                Text(DateUtils.formatDate(expense.dateMillis), style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Text("Rs. ${"%.2f".format(expense.amount)}", style = MaterialTheme.typography.titleMedium)
         }

@@ -74,7 +74,11 @@ fun ReportsScreen(viewModel: MainViewModel) {
             IconButton(onClick = { refMillis = DateUtils.addMonths(refMillis, -1) }) {
                 Icon(Icons.Filled.ChevronLeft, contentDescription = "Previous month")
             }
-            Text(DateUtils.formatMonthYear(refMillis), style = MaterialTheme.typography.titleLarge)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(DateUtils.formatNepaliMonthYear(refMillis), style = MaterialTheme.typography.titleLarge)
+                Text(DateUtils.formatMonthYear(refMillis), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             IconButton(onClick = { refMillis = DateUtils.addMonths(refMillis, 1) }) {
                 Icon(Icons.Filled.ChevronRight, contentDescription = "Next month")
             }

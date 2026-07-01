@@ -1,10 +1,12 @@
 package com.roomies.expensetracker
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
-import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Icon
@@ -15,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.core.content.ContextCompat
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -27,17 +30,35 @@ import com.roomies.expensetracker.ui.screens.ExpensesListScreen
 import com.roomies.expensetracker.ui.screens.RecurringScreen
 import com.roomies.expensetracker.ui.screens.ReportsScreen
 import com.roomies.expensetracker.ui.screens.SettingsScreen
+import com.roomies.expensetracker.ui.screens.ShoppingListScreen
 import com.roomies.expensetracker.ui.theme.ExpenseTrackerTheme
+import com.roomies.expensetracker.util.NotificationHelper
 import com.roomies.expensetracker.viewmodel.MainViewModel
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
 
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* silently accepted or denied — app works either way */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        NotificationHelper.createChannel(this)
+        requestNotificationPermissionIfNeeded()
         setContent {
             ExpenseTrackerTheme {
                 AppRoot(viewModel)
+            }
+        }
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
     }
@@ -78,9 +99,11 @@ fun AppRoot(viewModel: MainViewModel) {
         ) {
             composable(Screen.Add.route) { AddExpenseScreen(viewModel) }
             composable(Screen.Expenses.route) { ExpensesListScreen(viewModel) }
+            composable(Screen.Shopping.route) { ShoppingListScreen(viewModel, navController) }
             composable(Screen.Reports.route) { ReportsScreen(viewModel) }
             composable(Screen.Recurring.route) { RecurringScreen(viewModel) }
             composable(Screen.Settings.route) { SettingsScreen(viewModel) }
         }
     }
 }
+

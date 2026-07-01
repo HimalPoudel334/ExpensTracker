@@ -80,4 +80,19 @@ object DateUtils {
         )
         return NepaliDateConverter.formatNepaliDate(nepali, NepaliDatePickerDefaults.DefaultLocale)
     }
+
+    private val BS_MONTH_NAMES = listOf(
+        "Baisakh", "Jestha", "Asar", "Shrawan", "Bhadra", "Aswin",
+        "Kartik", "Mangsir", "Poush", "Magh", "Falgun", "Chaitra"
+    )
+
+    /** Formats as "Asar 2083" (BS month + year only) for report headers. */
+    fun formatNepaliMonthYear(localMillis: Long): String {
+        val cal = Calendar.getInstance().apply { timeInMillis = localMillis }
+        val nepali = NepaliDateConverter.convertEnglishToNepali(
+            cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH)
+        )
+        val monthName = BS_MONTH_NAMES.getOrElse(nepali.month - 1) { "Month ${nepali.month}" }
+        return "$monthName ${nepali.year}"
+    }
 }

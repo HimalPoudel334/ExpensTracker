@@ -1,19 +1,25 @@
 package com.roomies.expensetracker.viewmodel
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import android.content.Context
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.roomies.expensetracker.data.AuthManager
 import com.roomies.expensetracker.data.FirestoreRepository
 import com.roomies.expensetracker.model.AppSettings
 import com.roomies.expensetracker.model.Expense
 import com.roomies.expensetracker.model.RecurringExpense
+import com.roomies.expensetracker.model.ShoppingItem
+import com.roomies.expensetracker.util.DateUtils
+import com.roomies.expensetracker.util.NotificationHelper
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import com.roomies.expensetracker.util.DateUtils
 
-class MainViewModel : ViewModel() {
+class MainViewModel(app: Application) : AndroidViewModel(app) {
+
+    private val context: Context get() = getApplication()
 
     private val _expenses = MutableStateFlow<List<Expense>>(emptyList())
     val expenses: StateFlow<List<Expense>> = _expenses.asStateFlow()
@@ -24,13 +30,20 @@ class MainViewModel : ViewModel() {
     private val _settings = MutableStateFlow(AppSettings())
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
+    private val _shoppingList = MutableStateFlow<List<ShoppingItem>>(emptyList())
+    val shoppingList: StateFlow<List<ShoppingItem>> = _shoppingList.asStateFlow()
+
+    /** Set when user marks a shopping item as purchased and chooses to save as expense. */
+    private val _pendingShoppingItem = MutableStateFlow<ShoppingItem?>(null)
+    val pendingShoppingItem: StateFlow<ShoppingItem?> = _pendingShoppingItem.asStateFlow()
+
+    /** IDs seen during this session — used to detect truly new items for notifications. */
+    private val seenShoppingIds = mutableSetOf<String>()
+    private var shoppingInitialized = false
+
     init {
         viewModelScope.launch {
-            try {
-                AuthManager.ensureSignedIn()
-            } catch (e: Exception) {
-                // no internet right now, will retry on its own
-            }
+            try { AuthManager.ensureSignedIn() } catch (e: Exception) { }
         }
         viewModelScope.launch {
             FirestoreRepository.observeExpenses().collect { _expenses.value = it }
@@ -41,6 +54,45 @@ class MainViewModel : ViewModel() {
         viewModelScope.launch {
             FirestoreRepository.observeSettings().collect { _settings.value = it }
         }
+        viewModelScope.launch {
+            FirestoreRepository.observeShoppingList().collect { items ->
+                if (!shoppingInitialized) {
+                    // First load — seed seen set without notifying
+                    seenShoppingIds.addAll(items.map { it.id })
+                    shoppingInitialized = true
+                } else {
+                    // Subsequent updates — notify for any truly new items
+                    items.filter { it.id !in seenShoppingIds }.forEach { newItem ->
+                        NotificationHelper.notifyNewShoppingItem(context, newItem.name, newItem.addedBy)
+                        seenShoppingIds.add(newItem.id)
+                    }
+                }
+                _shoppingList.value = items
+            }
+        }
+    }
+
+    fun addShoppingItem(item: ShoppingItem) = viewModelScope.launch {
+        FirestoreRepository.addShoppingItem(item)
+    }
+
+    fun updateShoppingItem(item: ShoppingItem) = viewModelScope.launch {
+        FirestoreRepository.updateShoppingItem(item)
+    }
+
+    fun deleteShoppingItem(id: String) = viewModelScope.launch {
+        FirestoreRepository.deleteShoppingItem(id)
+        seenShoppingIds.remove(id)
+    }
+
+    /** Called when user marks an item purchased and wants to save it as an expense. */
+    fun setPendingShoppingItem(item: ShoppingItem) {
+        _pendingShoppingItem.value = item
+    }
+
+    /** Called by AddExpenseScreen after it has consumed the pending item. */
+    fun clearPendingShoppingItem() {
+        _pendingShoppingItem.value = null
     }
 
     fun addExpense(expense: Expense) = viewModelScope.launch {

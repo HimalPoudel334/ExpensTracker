@@ -25,13 +25,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.roomies.expensetracker.model.Expense
 import com.roomies.expensetracker.util.Constants
 import com.roomies.expensetracker.util.DateUtils
-import com.roomies.expensetracker.util.DeviceConfig
 import com.roomies.expensetracker.viewmodel.MainViewModel
 import dev.shivathapaa.nepalidatepickerkmp.NepaliDatePicker
 import dev.shivathapaa.nepalidatepickerkmp.NepaliDatePickerDialog
@@ -42,10 +40,9 @@ import kotlin.time.Duration.Companion.milliseconds
 
 @Composable
 fun AddExpenseScreen(viewModel: MainViewModel) {
-    val context = LocalContext.current
-
     val settings by viewModel.settings.collectAsState()
     val expenses by viewModel.expenses.collectAsState()
+    val pendingItem by viewModel.pendingShoppingItem.collectAsState()
 
     var amount by remember { mutableStateOf("") }
     var item by remember { mutableStateOf("") }
@@ -57,16 +54,24 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
     var showDatePicker by remember { mutableStateOf(false) }
     var showConfirmation by remember { mutableStateOf(false) }
 
-    val isMyDevice = DeviceConfig.isMyDevice(context)
-
-    LaunchedEffect(settings, isMyDevice) {
-        if (paidBy.isBlank()) {
-            paidBy = if (isMyDevice) {
-                settings.personAName
-            } else {
-                settings.personBName
+    // Pre-fill from shopping list if navigated from "Add as Expense"
+    LaunchedEffect(pendingItem) {
+        pendingItem?.let {
+            item = it.name
+            notes = buildString {
+                if (it.quantity.isNotBlank()) append("Qty: ${it.quantity}")
+                if (it.note.isNotBlank()) {
+                    if (isNotEmpty()) append(" | ")
+                    append(it.note)
+                }
             }
+            paidBy = it.addedBy.ifBlank { settings.personAName }
+            viewModel.clearPendingShoppingItem()
         }
+    }
+
+    LaunchedEffect(settings) {
+        if (paidBy.isBlank()) paidBy = settings.personAName
     }
 
     val itemSuggestions = remember(expenses, item) {
@@ -119,11 +124,6 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
             },
             modifier = Modifier.fillMaxWidth()
         )
-        Text(
-            "AD: ${DateUtils.formatDate(selectedDateMillis)}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
 
         DropdownField(
             label = "Category",
@@ -139,14 +139,12 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
             onSelected = { paymentMethod = it }
         )
 
-        if (isMyDevice) {
-            DropdownField(
-                label = "Paid By",
-                options = listOf(settings.personAName, settings.personBName),
-                selected = paidBy,
-                onSelected = { paidBy = it }
-            )
-        }
+        DropdownField(
+            label = "Paid By",
+            options = listOf(settings.personAName, settings.personBName),
+            selected = paidBy,
+            onSelected = { paidBy = it }
+        )
 
         OutlinedTextField(
             value = notes,
