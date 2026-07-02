@@ -61,9 +61,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     seenShoppingIds.addAll(items.map { it.id })
                     shoppingInitialized = true
                 } else {
-                    // Subsequent updates — notify for any truly new items
                     items.filter { it.id !in seenShoppingIds }.forEach { newItem ->
-                        NotificationHelper.notifyNewShoppingItem(context, newItem.name, newItem.addedBy)
+                        if (!newItem.addedByMe) {
+                            NotificationHelper.notifyNewShoppingItem(context, newItem.name, newItem.addedBy)
+                        }
                         seenShoppingIds.add(newItem.id)
                     }
                 }
@@ -147,7 +148,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ---------- Reports ----------
 
     fun expensesForMonth(refMillis: Long): List<Expense> =
-        _expenses.value.filter { DateUtils.isSameMonth(it.dateMillis, refMillis) }
+        _expenses.value.filter { DateUtils.isSameBsMonth(it.dateMillis, refMillis) }
 
     fun totalForMonth(refMillis: Long): Double =
         expensesForMonth(refMillis).sumOf { it.amount }
@@ -157,8 +158,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             .mapValues { entry -> entry.value.sumOf { it.amount } }
 
     fun byCategoryForMonth(refMillis: Long): Map<String, Double> =
-        expensesForMonth(refMillis).groupBy{it.category}
-            .mapValues{entry -> entry.value.sumOf {it.amount}}
+        expensesForMonth(refMillis).groupBy { it.category }
+            .mapValues { entry -> entry.value.sumOf { it.amount } }
 
     fun byPaymentMethodForMonth(refMillis: Long): Map<String, Double> =
         expensesForMonth(refMillis).groupBy { it.paymentMethod }

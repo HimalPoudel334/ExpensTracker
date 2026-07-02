@@ -71,7 +71,7 @@ fun ReportsScreen(viewModel: MainViewModel) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = { refMillis = DateUtils.addMonths(refMillis, -1) }) {
+            IconButton(onClick = { refMillis = DateUtils.addBsMonths(refMillis, -1) }) {
                 Icon(Icons.Filled.ChevronLeft, contentDescription = "Previous month")
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -79,7 +79,7 @@ fun ReportsScreen(viewModel: MainViewModel) {
                 Text(DateUtils.formatMonthYear(refMillis), style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            IconButton(onClick = { refMillis = DateUtils.addMonths(refMillis, 1) }) {
+            IconButton(onClick = { refMillis = DateUtils.addBsMonths(refMillis, 1) }) {
                 Icon(Icons.Filled.ChevronRight, contentDescription = "Next month")
             }
         }

@@ -17,12 +17,11 @@ import kotlinx.coroutines.tasks.await
  * devices are online and pointed at the same Firebase project.
  */
 object FirestoreRepository {
-    private val db: FirebaseFirestore
-        get() = FirebaseFirestore.getInstance()
-    private val expensesRef = db.collection("expenses")
-    private val recurringRef = db.collection("recurring")
-    private val settingsDoc = db.collection("config").document("settings")
-    private val shoppingRef = db.collection("shopping_list")
+    private val db by lazy { FirebaseFirestore.getInstance() }
+    private val expensesRef by lazy { db.collection("expenses") }
+    private val recurringRef by lazy { db.collection("recurring") }
+    private val settingsDoc by lazy { db.collection("config").document("settings") }
+    private val shoppingRef by lazy { db.collection("shopping_list") }
 
     fun observeExpenses(): Flow<List<Expense>> = callbackFlow {
         val listener = expensesRef

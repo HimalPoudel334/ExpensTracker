@@ -81,6 +81,32 @@ object DateUtils {
         return NepaliDateConverter.formatNepaliDate(nepali, NepaliDatePickerDefaults.DefaultLocale)
     }
 
+    /** "2083-3" style key based on BS month — used for BS-aware report filtering. */
+    fun bsMonthYearKey(localMillis: Long): String {
+        val cal = Calendar.getInstance().apply { timeInMillis = localMillis }
+        val nepali = NepaliDateConverter.convertEnglishToNepali(
+            cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH)
+        )
+        return "${nepali.year}-${nepali.month}"
+    }
+
+    fun isSameBsMonth(millis: Long, refMillis: Long): Boolean =
+        bsMonthYearKey(millis) == bsMonthYearKey(refMillis)
+
+    /** Navigate by BS months so Ashar stays Ashar regardless of AD month boundaries. */
+    fun addBsMonths(localMillis: Long, months: Int): Long {
+        val cal = Calendar.getInstance().apply { timeInMillis = localMillis }
+        val nepali = NepaliDateConverter.convertEnglishToNepali(
+            cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH)
+        )
+        var year = nepali.year
+        var month = nepali.month + months
+        while (month > 12) { month -= 12; year++ }
+        while (month < 1) { month += 12; year-- }
+        val english = NepaliDateConverter.convertNepaliToEnglish(year, month, 1)
+        return toLocalNoon(english.year, english.month - 1, english.dayOfMonth)
+    }
+
     private val BS_MONTH_NAMES = listOf(
         "Baisakh", "Jestha", "Asar", "Shrawan", "Bhadra", "Aswin",
         "Kartik", "Mangsir", "Poush", "Magh", "Falgun", "Chaitra"
@@ -96,3 +122,4 @@ object DateUtils {
         return "$monthName ${nepali.year}"
     }
 }
+

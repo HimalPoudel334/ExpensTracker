@@ -18,12 +18,10 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ShoppingCartCheckout
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -35,14 +33,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.roomies.expensetracker.model.ShoppingItem
 import com.roomies.expensetracker.ui.navigation.Screen
+import com.roomies.expensetracker.util.DeviceConfig
 import com.roomies.expensetracker.viewmodel.MainViewModel
 
 @Composable
 fun ShoppingListScreen(viewModel: MainViewModel, navController: NavController) {
+
+    val context = LocalContext.current
+
     val items by viewModel.shoppingList.collectAsState()
     val settings by viewModel.settings.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
@@ -90,16 +93,21 @@ fun ShoppingListScreen(viewModel: MainViewModel, navController: NavController) {
         }
     }
 
+    val expenses by viewModel.expenses.collectAsState()
+
     if (showAddDialog) {
         AddShoppingItemDialog(
             personNames = listOf(settings.personAName, settings.personBName),
+            existingItems = items,
+            expenseItems = expenses.map { it.item },
             onAdd = { name, qty, note, addedBy ->
                 viewModel.addShoppingItem(
                     ShoppingItem(
                         name = name,
                         quantity = qty,
                         note = note,
-                        addedBy = addedBy
+                        addedBy = addedBy,
+                        addedByMe = DeviceConfig.isMyDevice(context)
                     )
                 )
             },
@@ -123,8 +131,8 @@ fun ShoppingListScreen(viewModel: MainViewModel, navController: NavController) {
             text = { Text("Save \"${item.name}\" as an expense?") },
             confirmButton = {
                 Button(onClick = {
+                    // Do NOT delete here — AddExpenseScreen deletes after save
                     viewModel.setPendingShoppingItem(item)
-                    viewModel.deleteShoppingItem(item.id)
                     purchasedItem = null
                     navController.navigate(Screen.Add.route) {
                         launchSingleTop = true
@@ -134,6 +142,7 @@ fun ShoppingListScreen(viewModel: MainViewModel, navController: NavController) {
             dismissButton = {
                 Row {
                     TextButton(onClick = {
+                        // "Just remove" — delete immediately, no expense needed
                         viewModel.deleteShoppingItem(item.id)
                         purchasedItem = null
                     }) { Text("No, Just Remove") }
@@ -187,6 +196,8 @@ fun ShoppingItemRow(
 @Composable
 fun AddShoppingItemDialog(
     personNames: List<String>,
+    existingItems: List<ShoppingItem>,
+    expenseItems: List<String>,
     onAdd: (name: String, qty: String, note: String, addedBy: String) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -195,14 +206,27 @@ fun AddShoppingItemDialog(
     var note by remember { mutableStateOf("") }
     var addedBy by remember { mutableStateOf(personNames.firstOrNull() ?: "") }
 
+    val nameSuggestions = remember(existingItems, expenseItems, name) {
+        val query = name.trim()
+        if (query.isBlank()) emptyList()
+        else (existingItems.map { it.name } + expenseItems)
+            .distinctBy { it.lowercase() }
+            .filter { it.contains(query, ignoreCase = true) && !it.equals(query, ignoreCase = true) }
+            .sortedBy { it.lowercase() }
+            .take(6)
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Add Shopping Item") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = name, onValueChange = { name = it },
-                    label = { Text("Item name") }, modifier = Modifier.fillMaxWidth()
+                AutocompleteTextField(
+                    label = "Item name",
+                    value = name,
+                    suggestions = nameSuggestions,
+                    onValueChange = { name = it },
+                    onSuggestionSelected = { name = it }
                 )
                 OutlinedTextField(
                     value = qty, onValueChange = { qty = it },

@@ -38,6 +38,7 @@ import dev.shivathapaa.nepalidatepickerkmp.rememberNepaliDatePickerState
 import kotlinx.coroutines.delay
 import kotlin.time.Duration.Companion.milliseconds
 
+
 @Composable
 fun AddExpenseScreen(viewModel: MainViewModel) {
     val settings by viewModel.settings.collectAsState()
@@ -66,7 +67,7 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
                 }
             }
             paidBy = it.addedBy.ifBlank { settings.personAName }
-            viewModel.clearPendingShoppingItem()
+            // Do NOT clear pendingItem here — we need the ID when saving
         }
     }
 
@@ -124,6 +125,11 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
             },
             modifier = Modifier.fillMaxWidth()
         )
+        Text(
+            "AD: ${DateUtils.formatDate(selectedDateMillis)}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
 
         DropdownField(
             label = "Category",
@@ -168,6 +174,11 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
                             notes = notes.trim()
                         )
                     )
+                    // Now that expense is saved, remove the shopping item it came from
+                    pendingItem?.let {
+                        viewModel.deleteShoppingItem(it.id)
+                        viewModel.clearPendingShoppingItem()
+                    }
                     amount = ""
                     item = ""
                     notes = ""
@@ -183,7 +194,7 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
         if (showConfirmation) {
             Text("Expense saved \u2713", color = MaterialTheme.colorScheme.primary)
             LaunchedEffect(showConfirmation) {
-                delay(2000.milliseconds)
+                delay(2000)
                 showConfirmation = false
             }
         }

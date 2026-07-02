@@ -5,6 +5,7 @@ data class ShoppingItem(
     var name: String = "",
     var quantity: String = "",
     var addedBy: String = "",
+    var addedByMe: Boolean = false,
     var note: String = "",
     var addedAtMillis: Long = System.currentTimeMillis()
 )
