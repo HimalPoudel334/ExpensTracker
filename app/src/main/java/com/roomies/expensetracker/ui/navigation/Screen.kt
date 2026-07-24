@@ -4,6 +4,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Assessment
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Settings
@@ -17,6 +18,7 @@ sealed class Screen(val route: String, val label: String, val icon: ImageVector)
     object Reports : Screen("reports", "Reports", Icons.Filled.Assessment)
     object Recurring : Screen("recurring", "Recurring", Icons.Filled.Repeat)
     object Settings : Screen("settings", "Settings", Icons.Filled.Settings)
+    object Groups : Screen("groups", "Groups", Icons.Filled.Group)
 }
 
 val bottomNavItems = listOf(

@@ -28,6 +28,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -128,7 +129,7 @@ fun EditExpenseDialog(expense: Expense, viewModel: MainViewModel, onDismiss: () 
     var paymentMethod by remember { mutableStateOf(expense.paymentMethod) }
     var paidBy by remember { mutableStateOf(expense.paidBy) }
     var notes by remember { mutableStateOf(expense.notes) }
-    var selectedDateMillis by remember { mutableStateOf(expense.dateMillis) }
+    var selectedDateMillis by remember { mutableLongStateOf(expense.dateMillis) }
     var showDatePicker by remember { mutableStateOf(false) }
 
     AlertDialog(

@@ -36,7 +36,6 @@ import dev.shivathapaa.nepalidatepickerkmp.NepaliDatePickerDialog
 import dev.shivathapaa.nepalidatepickerkmp.calendar_model.NepaliDatePickerDefaults
 import dev.shivathapaa.nepalidatepickerkmp.rememberNepaliDatePickerState
 import kotlinx.coroutines.delay
-import kotlin.time.Duration.Companion.milliseconds
 
 
 @Composable

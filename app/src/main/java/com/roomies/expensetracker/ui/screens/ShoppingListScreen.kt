@@ -115,7 +115,7 @@ fun ShoppingListScreen(viewModel: MainViewModel, navController: NavController) {
         )
     }
 
-    editingItem?.let { item ->
+    editingItem?.let { item -> //EMVMAB
         EditShoppingItemDialog(
             item = item,
             onSave = { viewModel.updateShoppingItem(it) },

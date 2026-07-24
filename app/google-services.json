@@ -12,7 +12,20 @@
           "package_name": "com.roomies.expensetracker"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "1011943572355-kp5vr3e10mjjp8lida7qk908ohcq51q2.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.roomies.expensetracker",
+            "certificate_hash": "5f2e9e20fe5894870c0af6bbe56d222a5c829273"
+          }
+        },
+        {
+          "client_id": "1011943572355-pfo771iqkbisk7f2pdv90rmor1j1d7us.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyCid8lfdzH329XzJdGZtxQ-MdWqg1N3bxI"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1011943572355-pfo771iqkbisk7f2pdv90rmor1j1d7us.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

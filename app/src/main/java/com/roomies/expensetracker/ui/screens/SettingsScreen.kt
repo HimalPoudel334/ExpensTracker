@@ -16,13 +16,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.navigation.NavHostController
+import com.roomies.expensetracker.data.AuthManager
 import com.roomies.expensetracker.model.AppSettings
+import com.roomies.expensetracker.ui.navigation.Screen
 import com.roomies.expensetracker.viewmodel.MainViewModel
 
 @Composable
-fun SettingsScreen(viewModel: MainViewModel) {
+fun SettingsScreen(viewModel: MainViewModel, navController: NavHostController) {
+    val currentUser by AuthManager.currentUser.collectAsState()
+    val activeGroup by viewModel.activeGroup.collectAsState()
     val settings by viewModel.settings.collectAsState()
     var personA by remember(settings) { mutableStateOf(settings.personAName) }
     var personB by remember(settings) { mutableStateOf(settings.personBName) }
@@ -73,5 +79,31 @@ fun SettingsScreen(viewModel: MainViewModel) {
             "Both phones must use the same Firebase project (same google-services.json) for data to sync between devices.",
             style = MaterialTheme.typography.bodySmall
         )
+
+        HorizontalDivider()
+        Text("Group", style = MaterialTheme.typography.titleMedium)
+        Text(
+            activeGroup?.name ?: "No group selected",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        OutlinedButton(
+            onClick = { navController.navigate(Screen.Groups.route) },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Manage Groups")
+        }
+
+        HorizontalDivider()
+        Text("Account", style = MaterialTheme.typography.titleMedium)
+        Text(
+            currentUser?.email ?: currentUser?.displayName ?: "Signed in",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        OutlinedButton(
+            onClick = { AuthManager.signOut() },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Sign out")
+        }
     }
 }
