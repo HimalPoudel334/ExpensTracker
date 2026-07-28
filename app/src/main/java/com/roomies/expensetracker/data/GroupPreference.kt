@@ -1,6 +1,7 @@
 package com.roomies.expensetracker.data
 
 import android.content.Context
+import androidx.core.content.edit
 
 /**
  * Remembers which group this device last showed, per signed-in user.
@@ -16,11 +17,11 @@ object GroupPreference {
 
     fun setSelectedGroupId(context: Context, uid: String, groupId: String) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit().putString(key(uid), groupId).apply()
+            .edit { putString(key(uid), groupId) }
     }
 
     fun clearSelectedGroupId(context: Context, uid: String) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit().remove(key(uid)).apply()
+            .edit { remove(key(uid)) }
     }
 }

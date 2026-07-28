@@ -27,6 +27,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.roomies.expensetracker.data.AuthManager
 import com.roomies.expensetracker.model.Expense
 import com.roomies.expensetracker.util.Constants
 import com.roomies.expensetracker.util.DateUtils
@@ -36,19 +37,22 @@ import dev.shivathapaa.nepalidatepickerkmp.NepaliDatePickerDialog
 import dev.shivathapaa.nepalidatepickerkmp.calendar_model.NepaliDatePickerDefaults
 import dev.shivathapaa.nepalidatepickerkmp.rememberNepaliDatePickerState
 import kotlinx.coroutines.delay
+import kotlin.time.Duration.Companion.milliseconds
 
 
 @Composable
 fun AddExpenseScreen(viewModel: MainViewModel) {
     val settings by viewModel.settings.collectAsState()
     val expenses by viewModel.expenses.collectAsState()
+    val members by viewModel.members.collectAsState()
     val pendingItem by viewModel.pendingShoppingItem.collectAsState()
+    val currentUid = AuthManager.currentUser.collectAsState().value?.uid.orEmpty()
 
     var amount by remember { mutableStateOf("") }
     var item by remember { mutableStateOf("") }
     var category by remember { mutableStateOf(Constants.CATEGORIES.first()) }
     var paymentMethod by remember { mutableStateOf(Constants.PAYMENT_METHODS.first()) }
-    var paidBy by remember { mutableStateOf(settings.personAName) }
+    var paidBy by remember { mutableStateOf(currentUid) }
     var notes by remember { mutableStateOf("") }
     var selectedDateMillis by remember { mutableLongStateOf(DateUtils.todayLocalNoon()) }
     var showDatePicker by remember { mutableStateOf(false) }
@@ -65,13 +69,13 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
                     append(it.note)
                 }
             }
-            paidBy = it.addedBy.ifBlank { settings.personAName }
+            paidBy = it.addedBy.ifBlank { currentUid }
             // Do NOT clear pendingItem here — we need the ID when saving
         }
     }
 
-    LaunchedEffect(settings) {
-        if (paidBy.isBlank()) paidBy = settings.personAName
+    LaunchedEffect(currentUid) {
+        if (paidBy.isBlank()) paidBy = currentUid
     }
 
     val itemSuggestions = remember(expenses, item) {
@@ -79,11 +83,11 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
         if (query.isBlank()) {
             emptyList()
         } else {
-            expenses.map { it.item }
+            expenses.asSequence().map { it.item }
                 .distinctBy { it.lowercase() }
                 .filter { it.contains(query, ignoreCase = true) && !it.equals(query, ignoreCase = true) }
                 .sortedBy { it.lowercase() }
-                .take(6)
+                .take(6).toList()
         }
     }
 
@@ -144,10 +148,10 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
             onSelected = { paymentMethod = it }
         )
 
-        DropdownField(
+        MemberDropdownField(
             label = "Paid By",
-            options = listOf(settings.personAName, settings.personBName),
-            selected = paidBy,
+            members = members,
+            selectedUid = paidBy,
             onSelected = { paidBy = it }
         )
 
@@ -193,7 +197,7 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
         if (showConfirmation) {
             Text("Expense saved \u2713", color = MaterialTheme.colorScheme.primary)
             LaunchedEffect(showConfirmation) {
-                delay(2000)
+                delay(2000.milliseconds)
                 showConfirmation = false
             }
         }

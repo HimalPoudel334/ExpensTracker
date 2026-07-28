@@ -56,6 +56,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val activeGroupId: String? get() = activeGroup.value?.id
 
+    /** uid -> display name for everyone in the active group. Empty map while loading. */
+    val memberNames: StateFlow<Map<String, String>> = activeGroup
+        .map { it?.members ?: emptyList() }
+        .flatMapLatest { uids -> FirestoreRepository.observeUsersByIds(uids) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
+    /** (uid, displayName) pairs for the active group, sorted by name — feeds the "Paid By" pickers. */
+    val members: StateFlow<List<Pair<String, String>>> = combine(activeGroup, memberNames) { group, names ->
+        (group?.members ?: emptyList()).map { uid -> uid to (names[uid] ?: uid) }
+            .sortedBy { it.second.lowercase() }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     private val _expenses = MutableStateFlow<List<Expense>>(emptyList())
     val expenses: StateFlow<List<Expense>> = _expenses.asStateFlow()
 
@@ -72,9 +84,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _pendingShoppingItem = MutableStateFlow<ShoppingItem?>(null)
     val pendingShoppingItem: StateFlow<ShoppingItem?> = _pendingShoppingItem.asStateFlow()
 
-    /** IDs seen during this session — used to detect truly new items for notifications. */
+    /** IDs seen for the CURRENT group — reset whenever the active group changes, so switching
+     *  groups doesn't treat that group's existing items as "new" and spam notifications. */
     private val seenShoppingIds = mutableSetOf<String>()
-    private var shoppingInitialized = false
+    private var shoppingInitializedForGroup: String? = null
+
+    private val seenExpenseIds = mutableSetOf<String>()
+    private var expensesInitializedForGroup: String? = null
 
     init {
         viewModelScope.launch {
@@ -87,8 +103,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
         viewModelScope.launch {
             groupIdFlow.filterNotNull()
-                .flatMapLatest { groupId -> FirestoreRepository.observeExpenses(groupId) }
-                .collect { _expenses.value = it }
+                .flatMapLatest { groupId ->
+                    FirestoreRepository.observeExpenses(groupId).map { list -> groupId to list }
+                }
+                .collect { (groupId, list) ->
+                    if (expensesInitializedForGroup != groupId) {
+                        seenExpenseIds.clear()
+                        seenExpenseIds.addAll(list.map { it.id })
+                        expensesInitializedForGroup = groupId
+                    } else {
+                        val currentUid = AuthManager.currentUser.value?.uid
+                        list.filter { it.id !in seenExpenseIds }.forEach { newExpense ->
+                            if (newExpense.paidBy != currentUid) {
+                                val payerName = memberNames.value[newExpense.paidBy] ?: newExpense.paidBy
+                                val amountText = "${_settings.value.currencySymbol} ${"%.2f".format(newExpense.amount)}"
+                                NotificationHelper.notifyNewExpense(context, newExpense.item, amountText, payerName)
+                            }
+                            seenExpenseIds.add(newExpense.id)
+                        }
+                    }
+                    _expenses.value = list
+                }
         }
         viewModelScope.launch {
             groupIdFlow.filterNotNull()
@@ -102,16 +137,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch {
             groupIdFlow.filterNotNull()
-                .flatMapLatest { groupId -> FirestoreRepository.observeShoppingList(groupId) }
-                .collect { items ->
-                    if (!shoppingInitialized) {
-                        // First load — seed seen set without notifying
+                .flatMapLatest { groupId ->
+                    FirestoreRepository.observeShoppingList(groupId).map { list -> groupId to list }
+                }
+                .collect { (groupId, items) ->
+                    if (shoppingInitializedForGroup != groupId) {
+                        seenShoppingIds.clear()
                         seenShoppingIds.addAll(items.map { it.id })
-                        shoppingInitialized = true
+                        shoppingInitializedForGroup = groupId
                     } else {
                         items.filter { it.id !in seenShoppingIds }.forEach { newItem ->
                             if (!newItem.addedByMe) {
-                                NotificationHelper.notifyNewShoppingItem(context, newItem.name, newItem.addedBy)
+                                val addedByName = memberNames.value[newItem.addedBy] ?: newItem.addedBy
+                                NotificationHelper.notifyNewShoppingItem(context, newItem.name, addedByName)
                             }
                             seenShoppingIds.add(newItem.id)
                         }
@@ -300,20 +338,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             .sortedByDescending { it.second }
             .take(limit)
 
-    /** Assumes an equal 50/50 split between the two people. Returns (A paid, B paid, message). */
-    fun settlementForMonth(refMillis: Long): Triple<Double, Double, String> {
-        val settings = _settings.value
-        val byPerson = byPersonForMonth(refMillis)
-        val total = byPerson.values.sum()
-        val fairShare = total / 2.0
-        val aPaid = byPerson[settings.personAName] ?: 0.0
-        val bPaid = byPerson[settings.personBName] ?: 0.0
-        val aBalance = aPaid - fairShare
-        val message = when {
-            aBalance > 0.5 -> "${settings.personBName} owes ${settings.personAName} ${"%.2f".format(aBalance)}"
-            aBalance < -0.5 -> "${settings.personAName} owes ${settings.personBName} ${"%.2f".format(-aBalance)}"
-            else -> "Settled up \u2014 no one owes anything"
+    /**
+     * Net balance per member for the month, assuming every expense is split
+     * equally among all current group members regardless of who was in the
+     * group when the expense happened. Positive = owed money overall,
+     * negative = owes money overall. Uses the group's CURRENT member list
+     * (not historical), which is the simplest correct behavior for a
+     * household that rarely changes members mid-month.
+     */
+    fun balancesForMonth(refMillis: Long): Map<String, Double> {
+        val memberUids = activeGroup.value?.members ?: return emptyMap()
+        if (memberUids.isEmpty()) return emptyMap()
+        val balances = memberUids.associateWith { 0.0 }.toMutableMap()
+        expensesForMonth(refMillis).forEach { expense ->
+            val share = expense.amount / memberUids.size
+            memberUids.forEach { uid -> balances[uid] = (balances[uid] ?: 0.0) - share }
+            balances[expense.paidBy] = (balances[expense.paidBy] ?: 0.0) + expense.amount
         }
-        return Triple(aPaid, bPaid, message)
+        return balances
     }
 }

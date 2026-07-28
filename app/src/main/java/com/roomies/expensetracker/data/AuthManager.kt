@@ -1,6 +1,7 @@
 package com.roomies.expensetracker.data
 
 import android.content.Context
+import android.util.Log
 import com.roomies.expensetracker.R
 import androidx.credentials.CredentialManager
 import androidx.credentials.GetCredentialRequest
@@ -10,9 +11,13 @@ import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.security.SecureRandom
 import java.util.UUID
@@ -25,12 +30,22 @@ import java.util.UUID
  */
 object AuthManager {
     private val auth = FirebaseAuth.getInstance()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val _currentUser = MutableStateFlow(auth.currentUser)
     val currentUser: StateFlow<FirebaseUser?> = _currentUser.asStateFlow()
 
     init {
-        auth.addAuthStateListener { _currentUser.value = it.currentUser }
+        auth.addAuthStateListener { firebaseAuth ->
+            val user = firebaseAuth.currentUser
+            _currentUser.value = user
+            // Runs on EVERY app open where a session already exists, not just
+            // interactive sign-in -- this makes it self-healing if a previous
+            // write failed silently (e.g. a transient network blip).
+            if (user != null) {
+                scope.launch { ensureUserDoc(user) }
+            }
+        }
     }
 
     /**
@@ -61,7 +76,10 @@ object AuthManager {
             val authResult = auth.signInWithCredential(firebaseCredential).await()
             val user = authResult.user ?: return Result.failure(IllegalStateException("Sign-in returned no user"))
 
-            ensureUserDoc(user)
+            // Not calling ensureUserDoc here on purpose: signing in immediately
+            // swaps the UI away from LoginScreen, which cancels this coroutine's
+            // scope mid-flight. The auth state listener's own durable scope
+            // (see init block) writes users/{uid} instead, safely.
             Result.success(user)
         } catch (e: GetCredentialException) {
             Result.failure(e)
@@ -74,7 +92,7 @@ object AuthManager {
         auth.signOut()
     }
 
-    /** Creates users/{uid} on first sign-in; no-op if it already exists. */
+    /** Creates/repairs users/{uid}. Safe to call repeatedly -- merge write, not overwrite. */
     private suspend fun ensureUserDoc(user: FirebaseUser) {
         try {
             val userDoc = mapOf(
@@ -87,7 +105,10 @@ object AuthManager {
                 .set(userDoc, com.google.firebase.firestore.SetOptions.merge())
                 .await()
         } catch (e: Exception) {
-            // Non-fatal: user doc can be retried/backfilled later; don't block sign-in on this.
+            // Logged rather than silently swallowed -- if this keeps failing for
+            // one account, Logcat filtered on this tag will show why (e.g. a
+            // permission-denied from a rules issue, vs. a network timeout).
+            Log.e("AuthManager", "Failed to write users/${user.uid}", e)
         }
     }
 

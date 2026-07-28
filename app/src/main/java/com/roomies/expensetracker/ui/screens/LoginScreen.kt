@@ -36,7 +36,7 @@ fun LoginScreen() {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            "ExpensTracker",
+            "Expense Tracker",
             style = MaterialTheme.typography.headlineMedium,
             textAlign = TextAlign.Center
         )

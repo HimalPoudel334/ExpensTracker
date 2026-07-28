@@ -37,13 +37,13 @@ import androidx.core.content.FileProvider
 import com.roomies.expensetracker.model.Expense
 import com.roomies.expensetracker.util.CsvExporter
 import com.roomies.expensetracker.util.DateUtils
-import com.roomies.expensetracker.util.DeviceConfig
 import com.roomies.expensetracker.viewmodel.MainViewModel
 
 @Composable
 fun ReportsScreen(viewModel: MainViewModel) {
     val context = LocalContext.current
     val settings by viewModel.settings.collectAsState()
+    val memberNames by viewModel.memberNames.collectAsState()
     // collecting this keeps the screen recomposing whenever expenses change
     val expenseUpdates by viewModel.expenses.collectAsState()
 
@@ -55,9 +55,7 @@ fun ReportsScreen(viewModel: MainViewModel) {
     val byPayment = viewModel.byPaymentMethodForMonth(refMillis)
     val topByAmount = viewModel.topItemsByAmount(refMillis)
     val topByFrequency = viewModel.topItemsByFrequency(refMillis)
-    val (aPaid, bPaid, settlementMsg) = viewModel.settlementForMonth(refMillis)
-
-    val isMyDevice = DeviceConfig.isMyDevice(context)
+    val balances = viewModel.balancesForMonth(refMillis)
 
     Column(
         modifier = Modifier
@@ -87,8 +85,8 @@ fun ReportsScreen(viewModel: MainViewModel) {
         StatCard("Total Monthly Expenses", "${settings.currencySymbol} ${"%.2f".format(total)}")
 
         Text("Expenses by Person", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-        if (byPerson.isEmpty()) Text("No data") else byPerson.forEach { (person, amt) ->
-            ReportRow(person, "${settings.currencySymbol} ${"%.2f".format(amt)}")
+        if (byPerson.isEmpty()) Text("No data") else byPerson.forEach { (uid, amt) ->
+            ReportRow(memberNames[uid] ?: uid, "${settings.currencySymbol} ${"%.2f".format(amt)}")
         }
 
         Text("Expenses by Category", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
@@ -112,24 +110,26 @@ fun ReportsScreen(viewModel: MainViewModel) {
         }
 
         HorizontalDivider()
-        if (isMyDevice) {
-            Text(
-                "Settlement (assumes 50/50 split)",
-                style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary
-            )
-        }
-        ReportRow(settings.personAName, "${settings.currencySymbol} ${"%.2f".format(aPaid)} paid")
-        ReportRow(settings.personBName, "${settings.currencySymbol} ${"%.2f".format(bPaid)} paid")
-        if (isMyDevice) {
-            Text(
-                settlementMsg,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.primary
-            )
+        Text(
+            "Balances (equal split among current group members)",
+            style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary
+        )
+        if (balances.isEmpty()) {
+            Text("No group members to split between yet")
+        } else {
+            balances.entries.sortedByDescending { it.value }.forEach { (uid, balance) ->
+                val name = memberNames[uid] ?: uid
+                val label = when {
+                    balance > 0.5 -> "is owed ${settings.currencySymbol} ${"%.2f".format(balance)}"
+                    balance < -0.5 -> "owes ${settings.currencySymbol} ${"%.2f".format(-balance)}"
+                    else -> "settled up"
+                }
+                ReportRow(name, label)
+            }
         }
         Spacer(modifier = Modifier.height(8.dp))
         Button(
-            onClick = { exportAndShareCsv(context, viewModel.expensesForMonth(refMillis), refMillis) },
+            onClick = { exportAndShareCsv(context, viewModel.expensesForMonth(refMillis), refMillis, memberNames) },
             modifier = Modifier.fillMaxWidth()
         ) {
             Icon(Icons.Filled.Share, contentDescription = null)
@@ -150,8 +150,8 @@ fun ReportRow(label: String, value: String) {
     }
 }
 
-private fun exportAndShareCsv(context: Context, expenses: List<Expense>, refMillis: Long) {
-    val file = CsvExporter.export(context, expenses, DateUtils.formatMonthYear(refMillis))
+private fun exportAndShareCsv(context: Context, expenses: List<Expense>, refMillis: Long, memberNames: Map<String, String>) {
+    val file = CsvExporter.export(context, expenses, DateUtils.formatMonthYear(refMillis), memberNames)
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     val intent = Intent(Intent.ACTION_SEND).apply {
         type = "text/csv"

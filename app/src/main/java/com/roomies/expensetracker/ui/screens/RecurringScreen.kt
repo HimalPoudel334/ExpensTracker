@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.roomies.expensetracker.data.AuthManager
 import com.roomies.expensetracker.model.RecurringExpense
 import com.roomies.expensetracker.util.Constants
 import com.roomies.expensetracker.viewmodel.MainViewModel
@@ -41,6 +42,7 @@ import com.roomies.expensetracker.viewmodel.MainViewModel
 @Composable
 fun RecurringScreen(viewModel: MainViewModel) {
     val recurring by viewModel.recurring.collectAsState()
+    val memberNames by viewModel.memberNames.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -84,7 +86,7 @@ fun RecurringScreen(viewModel: MainViewModel) {
                             Column {
                                 Text(r.item, style = MaterialTheme.typography.titleMedium)
                                 Text(
-                                    "${r.category} \u2022 Day ${r.dayOfMonth} \u2022 ${r.paidBy} \u2022 ${r.paymentMethod}",
+                                    "${r.category} \u2022 Day ${r.dayOfMonth} \u2022 ${memberNames[r.paidBy] ?: r.paidBy} \u2022 ${r.paymentMethod}",
                                     style = MaterialTheme.typography.bodySmall
                                 )
                             }
@@ -109,12 +111,13 @@ fun RecurringScreen(viewModel: MainViewModel) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddRecurringDialog(viewModel: MainViewModel, onDismiss: () -> Unit) {
-    val settings by viewModel.settings.collectAsState()
+    val members by viewModel.members.collectAsState()
+    val currentUid = AuthManager.currentUser.collectAsState().value?.uid.orEmpty()
     var item by remember { mutableStateOf("") }
     var amount by remember { mutableStateOf("") }
     var category by remember { mutableStateOf(Constants.CATEGORIES.first()) }
     var paymentMethod by remember { mutableStateOf(Constants.PAYMENT_METHODS.first()) }
-    var paidBy by remember { mutableStateOf(settings.personAName) }
+    var paidBy by remember { mutableStateOf(currentUid) }
     var dayOfMonth by remember { mutableStateOf("1") }
 
     AlertDialog(
@@ -137,7 +140,7 @@ fun AddRecurringDialog(viewModel: MainViewModel, onDismiss: () -> Unit) {
                 )
                 DropdownField("Category", Constants.CATEGORIES, category) { category = it }
                 DropdownField("Payment Method", Constants.PAYMENT_METHODS, paymentMethod) { paymentMethod = it }
-                DropdownField("Paid By", listOf(settings.personAName, settings.personBName), paidBy) { paidBy = it }
+                MemberDropdownField("Paid By", members, paidBy) { paidBy = it }
                 OutlinedTextField(
                     value = dayOfMonth,
                     onValueChange = { dayOfMonth = it },

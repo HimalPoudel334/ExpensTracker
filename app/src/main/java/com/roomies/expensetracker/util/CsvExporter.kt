@@ -6,7 +6,7 @@ import java.io.File
 import java.io.FileWriter
 
 object CsvExporter {
-    fun export(context: Context, expenses: List<Expense>, label: String): File {
+    fun export(context: Context, expenses: List<Expense>, label: String, memberNames: Map<String, String>): File {
         val dir = File(context.cacheDir, "exports")
         if (!dir.exists()) dir.mkdirs()
         val safeLabel = label.replace(" ", "_")
@@ -18,7 +18,7 @@ object CsvExporter {
                         quote(e.item) + "," +
                         e.category + "," +
                         e.paymentMethod + "," +
-                        e.paidBy + "," +
+                        (memberNames[e.paidBy] ?: e.paidBy) + "," +
                         e.amount.toString() + "," +
                         quote(e.notes) + "\n")
             }

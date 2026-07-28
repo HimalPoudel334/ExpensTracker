@@ -1,6 +1,7 @@
 package com.roomies.expensetracker.data
 
 import com.google.firebase.Timestamp
+import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
@@ -15,14 +16,12 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
 
 /**
- * All reads are real-time Firestore listeners (callbackFlow), so when Person A
- * adds an expense, Person B's phone updates automatically as long as both
- * devices are online and pointed at the same Firebase project.
+ * All reads are real-time Firestore listeners (callbackFlow), so when any
+ * group member adds an expense, everyone else's app updates automatically.
  *
- * As of Phase 3, expenses/recurring/shopping_list/config all live under
- * groups/{groupId}/... instead of top-level, so every method now takes a
- * groupId. paidBy/addedBy remain free-text names for now (unchanged from
- * before) — switching those to uid-based group members is Phase 5.
+ * expenses/recurring/shopping_list/config all live under groups/{groupId}/...,
+ * so every method takes a groupId. paidBy/addedBy hold a uid (Phase 5) rather
+ * than a free-text name; use observeUsersByIds to resolve uid -> displayName.
  */
 object FirestoreRepository {
     private val db by lazy { FirebaseFirestore.getInstance() }
@@ -45,6 +44,31 @@ object FirestoreRepository {
                     doc.toObject(Group::class.java)?.apply { id = doc.id }
                 } ?: emptyList()
                 trySend(list)
+            }
+        awaitClose { listener.remove() }
+    }
+
+    /**
+     * Resolves uids to display names for the members dropdown/labels.
+     * Falls back to the email prefix, then the uid itself, if displayName is blank.
+     * Firestore's whereIn caps at 30 values, comfortably above any household size.
+     */
+    fun observeUsersByIds(uids: List<String>): Flow<Map<String, String>> = callbackFlow {
+        if (uids.isEmpty()) {
+            trySend(emptyMap())
+            awaitClose { }
+            return@callbackFlow
+        }
+        val listener = db.collection("users")
+            .whereIn(FieldPath.documentId(), uids)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) return@addSnapshotListener
+                val map = snapshot?.documents?.associate { doc ->
+                    val displayName = doc.getString("displayName")?.takeIf { it.isNotBlank() }
+                    val emailPrefix = doc.getString("email")?.substringBefore("@")?.takeIf { it.isNotBlank() }
+                    doc.id to (displayName ?: emailPrefix ?: doc.id)
+                } ?: emptyMap()
+                trySend(map)
             }
         awaitClose { listener.remove() }
     }

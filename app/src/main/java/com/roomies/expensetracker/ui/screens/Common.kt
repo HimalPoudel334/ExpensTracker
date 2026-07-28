@@ -10,6 +10,7 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -43,7 +44,7 @@ fun DropdownField(
             label = { Text(label) },
             trailingIcon = { Icon(Icons.Filled.ArrowDropDown, contentDescription = null) },
             modifier = Modifier
-                .menuAnchor()
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, true)
                 .fillMaxWidth()
         )
         ExposedDropdownMenu(
@@ -55,6 +56,52 @@ fun DropdownField(
                     text = { Text(option) },
                     onClick = {
                         onSelected(option)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Like DropdownField, but the options are (uid, displayName) pairs — shows
+ * names, emits the uid. Used for "Paid By"/"Added By" pickers now that those
+ * fields store a real group member's uid instead of a free-text name.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MemberDropdownField(
+    label: String,
+    members: List<Pair<String, String>>,
+    selectedUid: String,
+    onSelected: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selectedName = members.find { it.first == selectedUid }?.second ?: selectedUid
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = !expanded }
+    ) {
+        OutlinedTextField(
+            value = selectedName,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(label) },
+            trailingIcon = { Icon(Icons.Filled.ArrowDropDown, contentDescription = null) },
+            modifier = Modifier
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, true)
+                .fillMaxWidth()
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            members.forEach { (uid, name) ->
+                DropdownMenuItem(
+                    text = { Text(name) },
+                    onClick = {
+                        onSelected(uid)
                         expanded = false
                     }
                 )
@@ -101,7 +148,7 @@ fun AutocompleteTextField(
             },
             label = { Text(label) },
             modifier = Modifier
-                .menuAnchor()
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, true)
                 .fillMaxWidth()
         )
         ExposedDropdownMenu(

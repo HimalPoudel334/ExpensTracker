@@ -30,8 +30,6 @@ fun SettingsScreen(viewModel: MainViewModel, navController: NavHostController) {
     val currentUser by AuthManager.currentUser.collectAsState()
     val activeGroup by viewModel.activeGroup.collectAsState()
     val settings by viewModel.settings.collectAsState()
-    var personA by remember(settings) { mutableStateOf(settings.personAName) }
-    var personB by remember(settings) { mutableStateOf(settings.personBName) }
     var currency by remember(settings) { mutableStateOf(settings.currencySymbol) }
     var saved by remember { mutableStateOf(false) }
 
@@ -42,18 +40,6 @@ fun SettingsScreen(viewModel: MainViewModel, navController: NavHostController) {
         Text("Settings", style = MaterialTheme.typography.headlineSmall)
 
         OutlinedTextField(
-            value = personA,
-            onValueChange = { personA = it },
-            label = { Text("Person A Name") },
-            modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-            value = personB,
-            onValueChange = { personB = it },
-            label = { Text("Person B Name") },
-            modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
             value = currency,
             onValueChange = { currency = it },
             label = { Text("Currency Symbol") },
@@ -62,7 +48,7 @@ fun SettingsScreen(viewModel: MainViewModel, navController: NavHostController) {
 
         Button(
             onClick = {
-                viewModel.updateSettings(AppSettings(personA.trim(), personB.trim(), currency.trim()))
+                viewModel.updateSettings(AppSettings(currency.trim()))
                 saved = true
             },
             modifier = Modifier.fillMaxWidth()
@@ -73,12 +59,6 @@ fun SettingsScreen(viewModel: MainViewModel, navController: NavHostController) {
         if (saved) {
             Text("Saved \u2713", color = MaterialTheme.colorScheme.primary)
         }
-
-        HorizontalDivider()
-        Text(
-            "Both phones must use the same Firebase project (same google-services.json) for data to sync between devices.",
-            style = MaterialTheme.typography.bodySmall
-        )
 
         HorizontalDivider()
         Text("Group", style = MaterialTheme.typography.titleMedium)

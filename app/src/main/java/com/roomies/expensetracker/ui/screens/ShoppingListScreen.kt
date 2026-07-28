@@ -33,21 +33,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import com.roomies.expensetracker.data.AuthManager
 import com.roomies.expensetracker.model.ShoppingItem
 import com.roomies.expensetracker.ui.navigation.Screen
-import com.roomies.expensetracker.util.DeviceConfig
 import com.roomies.expensetracker.viewmodel.MainViewModel
 
 @Composable
 fun ShoppingListScreen(viewModel: MainViewModel, navController: NavController) {
 
-    val context = LocalContext.current
+    val currentUid = AuthManager.currentUser.collectAsState().value?.uid.orEmpty()
 
     val items by viewModel.shoppingList.collectAsState()
-    val settings by viewModel.settings.collectAsState()
+    val memberNames by viewModel.memberNames.collectAsState()
+    val members by viewModel.members.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
     var editingItem by remember { mutableStateOf<ShoppingItem?>(null) }
     var purchasedItem by remember { mutableStateOf<ShoppingItem?>(null) }
@@ -68,7 +68,7 @@ fun ShoppingListScreen(viewModel: MainViewModel, navController: NavController) {
             }
         }
         Text(
-            "Shared with both phones in real-time",
+            "Shared with your group in real-time",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -84,6 +84,7 @@ fun ShoppingListScreen(viewModel: MainViewModel, navController: NavController) {
                 items(items, key = { it.id }) { item ->
                     ShoppingItemRow(
                         item = item,
+                        memberNames = memberNames,
                         onEdit = { editingItem = item },
                         onDelete = { viewModel.deleteShoppingItem(item.id) },
                         onPurchased = { purchasedItem = item }
@@ -97,7 +98,8 @@ fun ShoppingListScreen(viewModel: MainViewModel, navController: NavController) {
 
     if (showAddDialog) {
         AddShoppingItemDialog(
-            personNames = listOf(settings.personAName, settings.personBName),
+            members = members,
+            currentUid = currentUid,
             existingItems = items,
             expenseItems = expenses.map { it.item },
             onAdd = { name, qty, note, addedBy ->
@@ -107,7 +109,7 @@ fun ShoppingListScreen(viewModel: MainViewModel, navController: NavController) {
                         quantity = qty,
                         note = note,
                         addedBy = addedBy,
-                        addedByMe = DeviceConfig.isMyDevice(context)
+                        addedByMe = addedBy == currentUid
                     )
                 )
             },
@@ -115,7 +117,7 @@ fun ShoppingListScreen(viewModel: MainViewModel, navController: NavController) {
         )
     }
 
-    editingItem?.let { item -> //EMVMAB
+    editingItem?.let { item ->
         EditShoppingItemDialog(
             item = item,
             onSave = { viewModel.updateShoppingItem(it) },
@@ -157,6 +159,7 @@ fun ShoppingListScreen(viewModel: MainViewModel, navController: NavController) {
 @Composable
 fun ShoppingItemRow(
     item: ShoppingItem,
+    memberNames: Map<String, String>,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onPurchased: () -> Unit
@@ -175,7 +178,7 @@ fun ShoppingItemRow(
                 if (item.note.isNotBlank())
                     Text(item.note, style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("Added by: ${item.addedBy}", style = MaterialTheme.typography.labelSmall,
+                Text("Added by: ${memberNames[item.addedBy] ?: item.addedBy}", style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             IconButton(onClick = onEdit) {
@@ -195,7 +198,8 @@ fun ShoppingItemRow(
 
 @Composable
 fun AddShoppingItemDialog(
-    personNames: List<String>,
+    members: List<Pair<String, String>>,
+    currentUid: String,
     existingItems: List<ShoppingItem>,
     expenseItems: List<String>,
     onAdd: (name: String, qty: String, note: String, addedBy: String) -> Unit,
@@ -204,7 +208,7 @@ fun AddShoppingItemDialog(
     var name by remember { mutableStateOf("") }
     var qty by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
-    var addedBy by remember { mutableStateOf(personNames.firstOrNull() ?: "") }
+    var addedBy by remember { mutableStateOf(currentUid) }
 
     val nameSuggestions = remember(existingItems, expenseItems, name) {
         val query = name.trim()
@@ -236,7 +240,7 @@ fun AddShoppingItemDialog(
                     value = note, onValueChange = { note = it },
                     label = { Text("Note (optional)") }, modifier = Modifier.fillMaxWidth()
                 )
-                DropdownField("Added by", personNames, addedBy) { addedBy = it }
+                MemberDropdownField("Added by", members, addedBy) { addedBy = it }
             }
         },
         confirmButton = {

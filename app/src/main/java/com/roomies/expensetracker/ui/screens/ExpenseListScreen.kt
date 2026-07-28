@@ -48,6 +48,7 @@ import dev.shivathapaa.nepalidatepickerkmp.rememberNepaliDatePickerState
 @Composable
 fun ExpensesListScreen(viewModel: MainViewModel) {
     val expenses by viewModel.expenses.collectAsState()
+    val memberNames by viewModel.memberNames.collectAsState()
     var searchQuery by remember { mutableStateOf("") }
     var editingExpense by remember { mutableStateOf<Expense?>(null) }
 
@@ -55,7 +56,7 @@ fun ExpensesListScreen(viewModel: MainViewModel) {
         searchQuery.isBlank() ||
                 it.item.contains(searchQuery, ignoreCase = true) ||
                 it.category.contains(searchQuery, ignoreCase = true) ||
-                it.paidBy.contains(searchQuery, ignoreCase = true)
+                (memberNames[it.paidBy] ?: it.paidBy).contains(searchQuery, ignoreCase = true)
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -82,7 +83,7 @@ fun ExpensesListScreen(viewModel: MainViewModel) {
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(filtered, key = { it.id }) { expense ->
-                    ExpenseRow(expense = expense, onClick = { editingExpense = expense })
+                    ExpenseRow(expense = expense, memberNames = memberNames, onClick = { editingExpense = expense })
                 }
             }
         }
@@ -98,7 +99,7 @@ fun ExpensesListScreen(viewModel: MainViewModel) {
 }
 
 @Composable
-fun ExpenseRow(expense: Expense, onClick: () -> Unit) {
+fun ExpenseRow(expense: Expense, memberNames: Map<String, String>, onClick: () -> Unit) {
     ElevatedCard(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(12.dp),
@@ -108,7 +109,7 @@ fun ExpenseRow(expense: Expense, onClick: () -> Unit) {
             Column {
                 Text(expense.item, style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "${expense.category} \u2022 ${expense.paymentMethod} \u2022 ${expense.paidBy}",
+                    "${expense.category} \u2022 ${expense.paymentMethod} \u2022 ${memberNames[expense.paidBy] ?: expense.paidBy}",
                     style = MaterialTheme.typography.bodySmall
                 )
                 Text(DateUtils.formatNepali(expense.dateMillis), style = MaterialTheme.typography.bodySmall)
@@ -122,7 +123,7 @@ fun ExpenseRow(expense: Expense, onClick: () -> Unit) {
 
 @Composable
 fun EditExpenseDialog(expense: Expense, viewModel: MainViewModel, onDismiss: () -> Unit) {
-    val settings by viewModel.settings.collectAsState()
+    val members by viewModel.members.collectAsState()
     var amount by remember { mutableStateOf(expense.amount.toString()) }
     var item by remember { mutableStateOf(expense.item) }
     var category by remember { mutableStateOf(expense.category) }
@@ -169,7 +170,7 @@ fun EditExpenseDialog(expense: Expense, viewModel: MainViewModel, onDismiss: () 
                 )
                 DropdownField("Category", Constants.CATEGORIES, category) { category = it }
                 DropdownField("Payment Method", Constants.PAYMENT_METHODS, paymentMethod) { paymentMethod = it }
-                DropdownField("Paid By", listOf(settings.personAName, settings.personBName), paidBy) { paidBy = it }
+                MemberDropdownField("Paid By", members, paidBy) { paidBy = it }
                 OutlinedTextField(
                     value = notes,
                     onValueChange = { notes = it },
