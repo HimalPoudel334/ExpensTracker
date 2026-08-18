@@ -2,7 +2,9 @@ package com.roomies.expensetracker.ui.screens
 
 import android.content.Context
 import android.content.Intent
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -12,22 +14,37 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Payment
+import androidx.compose.material.icons.filled.Payments
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -39,7 +56,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
@@ -51,6 +72,21 @@ import com.roomies.expensetracker.util.CsvExporter
 import com.roomies.expensetracker.util.DateUtils
 import com.roomies.expensetracker.viewmodel.MainViewModel
 
+private enum class ReportFilterMode { THIS_MONTH, CUSTOM_RANGE }
+
+/** Palette cycled through for category/person/payment-method breakdown bars. */
+private val ReportPalette = listOf(
+    Color(0xFF2E7D32), // primary green
+    Color(0xFFFFA000), // amber
+    Color(0xFF1976D2), // blue
+    Color(0xFF8E24AA), // purple
+    Color(0xFFD81B60), // pink
+    Color(0xFF00897B), // teal
+    Color(0xFF6D4C41), // brown
+    Color(0xFF546E7A), // blue grey
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReportsScreen(viewModel: MainViewModel) {
     val context = LocalContext.current
@@ -69,179 +105,265 @@ fun ReportsScreen(viewModel: MainViewModel) {
     var showRecordDialog by remember { mutableStateOf(false) }
     var prefillSettlement by remember { mutableStateOf<SuggestedSettlement?>(null) }
 
+    var filterMode by remember { mutableStateOf(ReportFilterMode.THIS_MONTH) }
     var refMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var rangeStart by remember { mutableLongStateOf(DateUtils.bsMonthStart(System.currentTimeMillis())) }
+    var rangeEnd by remember { mutableLongStateOf(DateUtils.bsMonthEnd(System.currentTimeMillis())) }
 
-    val total = viewModel.totalForMonth(refMillis)
-    val byPerson = viewModel.byPersonForMonth(refMillis)
-    val byCategory = viewModel.byCategoryForMonth(refMillis)
-    val byPayment = viewModel.byPaymentMethodForMonth(refMillis)
-    val topByAmount = viewModel.topItemsByAmount(refMillis)
-    val topByFrequency = viewModel.topItemsByFrequency(refMillis)
-    val balances = viewModel.balancesForMonth(refMillis)
+    val periodExpenses = when (filterMode) {
+        ReportFilterMode.THIS_MONTH -> viewModel.expensesForMonth(refMillis)
+        ReportFilterMode.CUSTOM_RANGE -> viewModel.expensesInRange(
+            minOf(rangeStart, rangeEnd), maxOf(rangeStart, rangeEnd)
+        )
+    }
+    val periodLabel = when (filterMode) {
+        ReportFilterMode.THIS_MONTH -> DateUtils.formatNepaliMonthYear(refMillis)
+        ReportFilterMode.CUSTOM_RANGE -> "${DateUtils.formatNepali(rangeStart)} \u2013 ${DateUtils.formatNepali(rangeEnd)}"
+    }
+    val exportLabel = when (filterMode) {
+        ReportFilterMode.THIS_MONTH -> DateUtils.formatMonthYear(refMillis)
+        ReportFilterMode.CUSTOM_RANGE -> "${DateUtils.formatDate(rangeStart)}_to_${DateUtils.formatDate(rangeEnd)}"
+    }
+
+    val total = viewModel.totalOf(periodExpenses)
+    val byPerson = viewModel.byPersonOf(periodExpenses).mapKeys { memberNames[it.key] ?: it.key }
+    val byCategory = viewModel.byCategoryOf(periodExpenses)
+    val byPayment = viewModel.byPaymentMethodOf(periodExpenses)
+    val topByAmount = viewModel.topItemsByAmountOf(periodExpenses)
+    val topByFrequency = viewModel.topItemsByFrequencyOf(periodExpenses)
+    val periodBalances = viewModel.balancesOf(periodExpenses)
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = { refMillis = DateUtils.addBsMonths(refMillis, -1) }) {
-                Icon(Icons.Filled.ChevronLeft, contentDescription = "Previous month")
-            }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(DateUtils.formatNepaliMonthYear(refMillis), style = MaterialTheme.typography.titleLarge)
-                Text(DateUtils.formatMonthYear(refMillis), style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            IconButton(onClick = { refMillis = DateUtils.addBsMonths(refMillis, 1) }) {
-                Icon(Icons.Filled.ChevronRight, contentDescription = "Next month")
-            }
+        Text("Reports", style = MaterialTheme.typography.headlineSmall)
+
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            SegmentedButton(
+                selected = filterMode == ReportFilterMode.THIS_MONTH,
+                onClick = { filterMode = ReportFilterMode.THIS_MONTH },
+                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
+            ) { Text("This Month") }
+            SegmentedButton(
+                selected = filterMode == ReportFilterMode.CUSTOM_RANGE,
+                onClick = {
+                    // Seed the range with the currently viewed BS month the first
+                    // time the user switches into custom range mode.
+                    if (filterMode != ReportFilterMode.CUSTOM_RANGE) {
+                        rangeStart = DateUtils.bsMonthStart(refMillis)
+                        rangeEnd = DateUtils.bsMonthEnd(refMillis)
+                    }
+                    filterMode = ReportFilterMode.CUSTOM_RANGE
+                },
+                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
+            ) { Text("Custom Range") }
         }
 
-        StatCard("Total Monthly Expenses", "${settings.currencySymbol} ${"%.2f".format(total)}")
-
-        Text("Expenses by Person", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-        if (byPerson.isEmpty()) Text("No data") else byPerson.forEach { (uid, amt) ->
-            ReportRow(memberNames[uid] ?: uid, "${settings.currencySymbol} ${"%.2f".format(amt)}")
-        }
-
-        Text("Expenses by Category", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-        if (byPerson.isEmpty()) Text("No data") else byCategory.forEach { (category, amt) ->
-            ReportRow(category, "${settings.currencySymbol} ${"%.2f".format(amt)}")
-        }
-
-        Text("Expenses by Payment Method", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-        if (byPayment.isEmpty()) Text("No data") else byPayment.forEach { (method, amt) ->
-            ReportRow(method, "${settings.currencySymbol} ${"%.2f".format(amt)}")
-        }
-
-        Text("Most Expended Items (by amount)", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-        if (topByAmount.isEmpty()) Text("No data") else topByAmount.forEach { (item, amt) ->
-            ReportRow(item, "${settings.currencySymbol} ${"%.2f".format(amt)}")
-        }
-
-        Text("Most Frequently Bought Items", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-        if (topByFrequency.isEmpty()) Text("No data") else topByFrequency.forEach { (item, count) ->
-            ReportRow(item, "$count time(s)")
-        }
-
-        HorizontalDivider()
-        Text(
-            "Balances (equal split among current group members)",
-            style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary
-        )
-        if (balances.isEmpty()) {
-            Text("No group members to split between yet")
-        } else {
-            balances.entries.sortedByDescending { it.value }.forEach { (uid, balance) ->
-                val name = memberNames[uid] ?: uid
-                val label = when {
-                    balance > 0.5 -> "is owed ${settings.currencySymbol} ${"%.2f".format(balance)}"
-                    balance < -0.5 -> "owes ${settings.currencySymbol} ${"%.2f".format(-balance)}"
-                    else -> "settled up"
+        if (filterMode == ReportFilterMode.THIS_MONTH) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = { refMillis = DateUtils.addBsMonths(refMillis, -1) }) {
+                    Icon(Icons.Filled.ChevronLeft, contentDescription = "Previous month")
                 }
-                ReportRow(name, label)
-            }
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(
-            onClick = { exportAndShareCsv(context, viewModel.expensesForMonth(refMillis), refMillis, memberNames) },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Icon(Icons.Filled.Share, contentDescription = null)
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Export Month as CSV")
-        }
-
-        HorizontalDivider()
-        Text(
-            "Overall Balance (all-time)",
-            style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary
-        )
-        if (netBalances.isEmpty()) {
-            Text("No group members to split between yet")
-        } else {
-            netBalances.entries.sortedByDescending { it.value }.forEach { (uid, balance) ->
-                val name = memberNames[uid] ?: uid
-                val label = when {
-                    balance > 0.5 -> "is owed ${settings.currencySymbol} ${"%.2f".format(balance)}"
-                    balance < -0.5 -> "owes ${settings.currencySymbol} ${"%.2f".format(-balance)}"
-                    else -> "settled up"
-                }
-                ReportRow(name, label)
-            }
-        }
-
-        if (suggestedSettlements.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(4.dp))
-            Text("Suggested Settlements", style = MaterialTheme.typography.titleSmall)
-            suggestedSettlements.forEach { suggestion ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(DateUtils.formatNepaliMonthYear(refMillis), style = MaterialTheme.typography.titleLarge)
                     Text(
-                        "${memberNames[suggestion.fromUid] ?: suggestion.fromUid} → " +
-                            "${memberNames[suggestion.toUid] ?: suggestion.toUid}: " +
-                            "${settings.currencySymbol} ${"%.2f".format(suggestion.amount)}",
-                        style = MaterialTheme.typography.bodyMedium
+                        DateUtils.formatMonthYear(refMillis), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    TextButton(onClick = { prefillSettlement = suggestion }) {
-                        Text("Settle")
-                    }
                 }
+                IconButton(onClick = { refMillis = DateUtils.addBsMonths(refMillis, 1) }) {
+                    Icon(Icons.Filled.ChevronRight, contentDescription = "Next month")
+                }
+            }
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                NepaliDatePickerField(
+                    label = "From",
+                    selectedMillis = rangeStart,
+                    modifier = Modifier.weight(1f),
+                    onDateSelected = { rangeStart = it }
+                )
+                NepaliDatePickerField(
+                    label = "To",
+                    selectedMillis = rangeEnd,
+                    modifier = Modifier.weight(1f),
+                    onDateSelected = { rangeEnd = it }
+                )
             }
         }
 
-        if (settlementsList.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(4.dp))
-            Text("Recent Settlements", style = MaterialTheme.typography.titleSmall)
-            settlementsList.take(10).forEach { s ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            "${memberNames[s.fromUid] ?: s.fromUid} paid ${memberNames[s.toUid] ?: s.toUid} " +
-                                "${settings.currencySymbol} ${"%.2f".format(s.amount)}",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Text(
-                            DateUtils.formatDate(s.dateMillis),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+        ReportHeroCard(periodLabel = periodLabel, total = total, currencySymbol = settings.currencySymbol)
+
+        if (periodExpenses.isEmpty()) {
+            EmptyReportState()
+        } else {
+            ReportSection(title = "By Category", icon = Icons.Filled.Category) {
+                BreakdownBarList(byCategory, total, settings.currencySymbol)
+            }
+
+            ReportSection(title = "By Person", icon = Icons.Filled.Person) {
+                BreakdownBarList(byPerson, total, settings.currencySymbol)
+            }
+
+            ReportSection(title = "By Payment Method", icon = Icons.Filled.Payments) {
+                BreakdownBarList(byPayment, total, settings.currencySymbol)
+            }
+
+            ReportSection(title = "Top Items", icon = Icons.Filled.Star) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "By Amount", style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (topByAmount.isEmpty()) {
+                        Text("No data", style = MaterialTheme.typography.bodyMedium)
+                    } else {
+                        topByAmount.forEachIndexed { index, (item, amt) ->
+                            RankedRow(index + 1, item, "${settings.currencySymbol} ${"%.2f".format(amt)}")
+                        }
                     }
-                    if (canManage) {
-                        IconButton(onClick = { viewModel.deleteSettlement(s.id) }) {
-                            Icon(
-                                Icons.Filled.Delete,
-                                contentDescription = "Delete settlement",
-                                tint = MaterialTheme.colorScheme.error
-                            )
+                    HorizontalDivider()
+                    Text(
+                        "By Frequency", style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (topByFrequency.isEmpty()) {
+                        Text("No data", style = MaterialTheme.typography.bodyMedium)
+                    } else {
+                        topByFrequency.forEachIndexed { index, (item, count) ->
+                            RankedRow(index + 1, item, "$count time(s)")
+                        }
+                    }
+                }
+            }
+
+            ReportSection(title = "Balances This Period", icon = Icons.Filled.AccountBalanceWallet) {
+                if (periodBalances.isEmpty()) {
+                    Text(
+                        "No group members to split between yet",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        periodBalances.entries.sortedByDescending { it.value }.forEach { (uid, balance) ->
+                            BalanceRow(memberNames[uid] ?: uid, balance, settings.currencySymbol)
                         }
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(4.dp))
-        OutlinedButton(
-            onClick = { showRecordDialog = true },
-            modifier = Modifier.fillMaxWidth()
+        Button(
+            onClick = { exportAndShareCsv(context, periodExpenses, exportLabel, memberNames) },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = periodExpenses.isNotEmpty()
         ) {
-            Icon(Icons.Filled.Payment, contentDescription = null)
+            Icon(Icons.Filled.Share, contentDescription = null)
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Record a Payment")
+            Text("Export as CSV")
+        }
+
+        ReportSection(title = "Settle Up (all-time)", icon = Icons.Filled.SwapHoriz) {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (netBalances.isEmpty()) {
+                        Text(
+                            "No group members to split between yet",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        netBalances.entries.sortedByDescending { it.value }.forEach { (uid, balance) ->
+                            BalanceRow(memberNames[uid] ?: uid, balance, settings.currencySymbol)
+                        }
+                    }
+                }
+
+                if (suggestedSettlements.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "Suggested Settlements", style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        suggestedSettlements.forEach { suggestion ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "${memberNames[suggestion.fromUid] ?: suggestion.fromUid} \u2192 " +
+                                        "${memberNames[suggestion.toUid] ?: suggestion.toUid}: " +
+                                        "${settings.currencySymbol} ${"%.2f".format(suggestion.amount)}",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                TextButton(onClick = { prefillSettlement = suggestion }) {
+                                    Text("Settle")
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (settlementsList.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            "Recent Settlements", style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        settlementsList.take(10).forEach { s ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(
+                                        "${memberNames[s.fromUid] ?: s.fromUid} paid ${memberNames[s.toUid] ?: s.toUid} " +
+                                            "${settings.currencySymbol} ${"%.2f".format(s.amount)}",
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    Text(
+                                        DateUtils.formatDate(s.dateMillis),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                if (canManage) {
+                                    IconButton(onClick = { viewModel.deleteSettlement(s.id) }) {
+                                        Icon(
+                                            Icons.Filled.Delete,
+                                            contentDescription = "Delete settlement",
+                                            tint = MaterialTheme.colorScheme.error
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                OutlinedButton(
+                    onClick = { showRecordDialog = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Filled.Payment, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Record a Payment")
+                }
+            }
         }
     }
 
@@ -276,13 +398,183 @@ fun ReportsScreen(viewModel: MainViewModel) {
 }
 
 @Composable
-fun ReportRow(label: String, value: String) {
+private fun ReportHeroCard(periodLabel: String, total: Double, currencySymbol: String) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Text(
+                periodLabel.uppercase(),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f)
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                "$currencySymbol ${"%.2f".format(total)}",
+                style = MaterialTheme.typography.displaySmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+            Text(
+                "Total spent",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReportSection(title: String, icon: ImageVector, content: @Composable () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.width(20.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            }
+            content()
+        }
+    }
+}
+
+@Composable
+private fun BreakdownBarList(data: Map<String, Double>, total: Double, currencySymbol: String) {
+    if (data.isEmpty()) {
+        Text("No data", style = MaterialTheme.typography.bodyMedium)
+        return
+    }
+    val sorted = data.entries.sortedByDescending { it.value }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        sorted.forEachIndexed { index, (label, amount) ->
+            val fraction = if (total > 0) (amount / total).toFloat().coerceIn(0f, 1f) else 0f
+            val color = ReportPalette[index % ReportPalette.size]
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(label, style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "$currencySymbol ${"%.2f".format(amount)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(fraction)
+                            .height(8.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(color)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RankedRow(rank: Int, label: String, valueText: String) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(label)
-        Text(value, style = MaterialTheme.typography.bodyMedium)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                modifier = Modifier.width(24.dp).height(24.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        "$rank",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+        }
+        Text(valueText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun BalanceRow(name: String, balance: Double, currencySymbol: String) {
+    val (label, containerColor, contentColor) = when {
+        balance > 0.5 -> Triple(
+            "is owed $currencySymbol ${"%.2f".format(balance)}",
+            MaterialTheme.colorScheme.tertiaryContainer,
+            MaterialTheme.colorScheme.onTertiaryContainer
+        )
+        balance < -0.5 -> Triple(
+            "owes $currencySymbol ${"%.2f".format(-balance)}",
+            MaterialTheme.colorScheme.errorContainer,
+            MaterialTheme.colorScheme.onErrorContainer
+        )
+        else -> Triple(
+            "settled up",
+            MaterialTheme.colorScheme.surfaceVariant,
+            MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = containerColor,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(name, style = MaterialTheme.typography.bodyMedium, color = contentColor, fontWeight = FontWeight.Medium)
+            Text(label, style = MaterialTheme.typography.bodyMedium, color = contentColor)
+        }
+    }
+}
+
+@Composable
+private fun EmptyReportState() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                Icons.Filled.Receipt,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.height(40.dp)
+            )
+            Text(
+                "No expenses for this period",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 
@@ -351,8 +643,8 @@ fun RecordSettlementDialog(
     )
 }
 
-private fun exportAndShareCsv(context: Context, expenses: List<Expense>, refMillis: Long, memberNames: Map<String, String>) {
-    val file = CsvExporter.export(context, expenses, DateUtils.formatMonthYear(refMillis), memberNames)
+private fun exportAndShareCsv(context: Context, expenses: List<Expense>, label: String, memberNames: Map<String, String>) {
+    val file = CsvExporter.export(context, expenses, label, memberNames)
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     val intent = Intent(Intent.ACTION_SEND).apply {
         type = "text/csv"

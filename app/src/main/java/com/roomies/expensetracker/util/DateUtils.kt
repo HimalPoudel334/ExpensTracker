@@ -36,6 +36,13 @@ object DateUtils {
         return cal.timeInMillis
     }
 
+    /** Plain AD calendar-day arithmetic, preserving whatever time-of-day `millis` carries. */
+    fun addDays(millis: Long, days: Int): Long {
+        val cal = Calendar.getInstance().apply { timeInMillis = millis }
+        cal.add(Calendar.DAY_OF_MONTH, days)
+        return cal.timeInMillis
+    }
+
     fun millisForDayInMonth(refMillis: Long, day: Int): Long {
         val cal = Calendar.getInstance().apply { timeInMillis = refMillis }
         val maxDay = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
@@ -106,6 +113,12 @@ object DateUtils {
         val english = NepaliDateConverter.convertNepaliToEnglish(year, month, 1)
         return toLocalNoon(english.year, english.month - 1, english.dayOfMonth)
     }
+
+    /** AD millis (local noon) for day 1 of the BS month containing `refMillis`. */
+    fun bsMonthStart(refMillis: Long): Long = addBsMonths(refMillis, 0)
+
+    /** AD millis (local noon) for the last day of the BS month containing `refMillis`. */
+    fun bsMonthEnd(refMillis: Long): Long = addDays(addBsMonths(refMillis, 1), -1)
 
     private val BS_MONTH_NAMES = listOf(
         "Baisakh", "Jestha", "Asar", "Shrawan", "Bhadra", "Aswin",

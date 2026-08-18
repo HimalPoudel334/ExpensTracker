@@ -14,7 +14,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -23,6 +24,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -31,6 +35,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,50 +47,74 @@ import com.roomies.expensetracker.model.canManagePayers
 import com.roomies.expensetracker.util.Constants
 import com.roomies.expensetracker.util.DateUtils
 import com.roomies.expensetracker.viewmodel.MainViewModel
-import dev.shivathapaa.nepalidatepickerkmp.NepaliDatePicker
-import dev.shivathapaa.nepalidatepickerkmp.NepaliDatePickerDialog
-import dev.shivathapaa.nepalidatepickerkmp.calendar_model.NepaliDatePickerDefaults
-import dev.shivathapaa.nepalidatepickerkmp.rememberNepaliDatePickerState
+import kotlinx.coroutines.launch
 
 @Composable
 fun ExpensesListScreen(viewModel: MainViewModel) {
-    val expenses by viewModel.expenses.collectAsState()
     val memberNames by viewModel.memberNames.collectAsState()
+    // collecting this keeps the screen recomposing whenever expenses change
+    val expenseUpdates by viewModel.expenses.collectAsState()
     var searchQuery by remember { mutableStateOf("") }
     var editingExpense by remember { mutableStateOf<Expense?>(null) }
+    var refMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
 
-    val filtered = expenses.filter {
+    val monthExpenses = viewModel.expensesForMonth(refMillis)
+    val filtered = monthExpenses.filter {
         searchQuery.isBlank() ||
                 it.item.contains(searchQuery, ignoreCase = true) ||
                 it.category.contains(searchQuery, ignoreCase = true) ||
                 (memberNames[it.paidBy] ?: it.paidBy).contains(searchQuery, ignoreCase = true)
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Expenses", style = MaterialTheme.typography.headlineSmall)
-        Spacer(modifier = Modifier.height(8.dp))
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { searchQuery = it },
-            label = { Text("Search by item, category, or person") },
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-
-        if (filtered.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                contentAlignment = Alignment.Center
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) }
+    ) { innerPadding ->
+        Column(modifier = Modifier.fillMaxSize().padding(innerPadding).padding(16.dp)) {
+            Text("Expenses", style = MaterialTheme.typography.headlineSmall)
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("No expenses found")
+                IconButton(onClick = { refMillis = DateUtils.addBsMonths(refMillis, -1) }) {
+                    Icon(Icons.Filled.ChevronLeft, contentDescription = "Previous month")
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(DateUtils.formatNepaliMonthYear(refMillis), style = MaterialTheme.typography.titleMedium)
+                    Text(DateUtils.formatMonthYear(refMillis), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                IconButton(onClick = { refMillis = DateUtils.addBsMonths(refMillis, 1) }) {
+                    Icon(Icons.Filled.ChevronRight, contentDescription = "Next month")
+                }
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(filtered, key = { it.id }) { expense ->
-                    ExpenseRow(expense = expense, memberNames = memberNames, onClick = { editingExpense = expense })
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                label = { Text("Search by item, category, or person") },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (filtered.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("No expenses found")
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(filtered, key = { it.id }) { expense ->
+                        ExpenseRow(expense = expense, memberNames = memberNames, onClick = { editingExpense = expense })
+                    }
                 }
             }
         }
@@ -95,7 +124,19 @@ fun ExpensesListScreen(viewModel: MainViewModel) {
         EditExpenseDialog(
             expense = expense,
             viewModel = viewModel,
-            onDismiss = { editingExpense = null }
+            onDismiss = { editingExpense = null },
+            onSaved = { updated ->
+                // Editing isn't restricted to the currently viewed month — let
+                // the user know it saved fine even if it just disappeared from
+                // this month's list.
+                if (!DateUtils.isSameBsMonth(updated.dateMillis, refMillis)) {
+                    coroutineScope.launch {
+                        snackbarHostState.showSnackbar(
+                            "Saved — moved to ${DateUtils.formatNepaliMonthYear(updated.dateMillis)}"
+                        )
+                    }
+                }
+            }
         )
     }
 }
@@ -124,7 +165,12 @@ fun ExpenseRow(expense: Expense, memberNames: Map<String, String>, onClick: () -
 }
 
 @Composable
-fun EditExpenseDialog(expense: Expense, viewModel: MainViewModel, onDismiss: () -> Unit) {
+fun EditExpenseDialog(
+    expense: Expense,
+    viewModel: MainViewModel,
+    onDismiss: () -> Unit,
+    onSaved: (Expense) -> Unit = {}
+) {
     val members by viewModel.members.collectAsState()
     val activeGroup by viewModel.activeGroup.collectAsState()
     val settings by viewModel.settings.collectAsState()
@@ -138,7 +184,6 @@ fun EditExpenseDialog(expense: Expense, viewModel: MainViewModel, onDismiss: () 
     var paidBy by remember { mutableStateOf(expense.paidBy) }
     var notes by remember { mutableStateOf(expense.notes) }
     var selectedDateMillis by remember { mutableLongStateOf(expense.dateMillis) }
-    var showDatePicker by remember { mutableStateOf(false) }
     var useCustomSplit by remember { mutableStateOf(expense.splitAmong.isNotEmpty()) }
     var splitValues by remember {
         mutableStateOf(expense.splitAmong.mapValues { (_, v) -> v.toString() })
@@ -166,17 +211,10 @@ fun EditExpenseDialog(expense: Expense, viewModel: MainViewModel, onDismiss: () 
                     label = { Text("Item") },
                     modifier = Modifier.fillMaxWidth()
                 )
-                OutlinedTextField(
-                    value = DateUtils.formatNepali(selectedDateMillis),
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text("Date (BS)") },
-                    trailingIcon = {
-                        IconButton(onClick = { showDatePicker = true }) {
-                            Icon(Icons.Filled.DateRange, contentDescription = "Pick date")
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
+                NepaliDatePickerField(
+                    label = "Date (BS)",
+                    selectedMillis = selectedDateMillis,
+                    onDateSelected = { selectedDateMillis = it }
                 )
                 Text(
                     "AD: ${DateUtils.formatDate(selectedDateMillis)}",
@@ -230,18 +268,18 @@ fun EditExpenseDialog(expense: Expense, viewModel: MainViewModel, onDismiss: () 
                 Button(
                     onClick = {
                         if (amt != null && amt > 0 && item.isNotBlank()) {
-                            viewModel.updateExpense(
-                                expense.copy(
-                                    amount = amt,
-                                    item = item.trim(),
-                                    category = category,
-                                    paymentMethod = paymentMethod,
-                                    paidBy = if (canChoosePayer) paidBy else expense.paidBy,
-                                    dateMillis = selectedDateMillis,
-                                    notes = notes.trim(),
-                                    splitAmong = if (canEditSplit) resolveSplitAmong(useCustomSplit, splitValues) else expense.splitAmong
-                                )
+                            val updated = expense.copy(
+                                amount = amt,
+                                item = item.trim(),
+                                category = category,
+                                paymentMethod = paymentMethod,
+                                paidBy = if (canChoosePayer) paidBy else expense.paidBy,
+                                dateMillis = selectedDateMillis,
+                                notes = notes.trim(),
+                                splitAmong = if (canEditSplit) resolveSplitAmong(useCustomSplit, splitValues) else expense.splitAmong
                             )
+                            viewModel.updateExpense(updated)
+                            onSaved(updated)
                             onDismiss()
                         }
                     },
@@ -255,34 +293,4 @@ fun EditExpenseDialog(expense: Expense, viewModel: MainViewModel, onDismiss: () 
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
-
-    if (showDatePicker) {
-        val nepaliDatePickerState = rememberNepaliDatePickerState(
-            initialSelectedDate = DateUtils.toNepaliSimpleDate(selectedDateMillis)
-        )
-        NepaliDatePickerDialog(
-            onDismissRequest = { showDatePicker = false },
-            confirmButton = {
-                NepaliDatePickerDefaults.DialogButton(
-                    text = "OK",
-                    onButtonClick = {
-                        nepaliDatePickerState.selectedEnglishDate?.let { english ->
-                            selectedDateMillis = DateUtils.fromEnglishCustomCalendar(
-                                english.year, english.month, english.dayOfMonth
-                            )
-                        }
-                        showDatePicker = false
-                    }
-                )
-            },
-            dismissButton = {
-                NepaliDatePickerDefaults.DialogButton(
-                    text = "Cancel",
-                    onButtonClick = { showDatePicker = false }
-                )
-            }
-        ) {
-            NepaliDatePicker(state = nepaliDatePickerState)
-        }
-    }
 }

@@ -9,12 +9,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -27,6 +29,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.roomies.expensetracker.util.DateUtils
+import dev.shivathapaa.nepalidatepickerkmp.NepaliDatePicker
+import dev.shivathapaa.nepalidatepickerkmp.NepaliDatePickerDialog
+import dev.shivathapaa.nepalidatepickerkmp.calendar_model.NepaliDatePickerDefaults
+import dev.shivathapaa.nepalidatepickerkmp.rememberNepaliDatePickerState
 import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -122,6 +129,66 @@ fun StatCard(title: String, value: String) {
             Text(title, style = MaterialTheme.typography.labelMedium)
             Spacer(modifier = Modifier.height(4.dp))
             Text(value, style = MaterialTheme.typography.headlineSmall)
+        }
+    }
+}
+
+/**
+ * Read-only text field that opens a Nepali (BS) date picker dialog when tapped.
+ * `selectedMillis` is our local-noon AD storage convention; `onDateSelected`
+ * receives the same convention back.
+ */
+@Composable
+fun NepaliDatePickerField(
+    label: String,
+    selectedMillis: Long,
+    modifier: Modifier = Modifier,
+    onDateSelected: (Long) -> Unit
+) {
+    var showDialog by remember { mutableStateOf(false) }
+
+    OutlinedTextField(
+        value = DateUtils.formatNepali(selectedMillis),
+        onValueChange = {},
+        readOnly = true,
+        label = { Text(label) },
+        trailingIcon = {
+            IconButton(onClick = { showDialog = true }) {
+                Icon(Icons.Filled.DateRange, contentDescription = "Pick date")
+            }
+        },
+        modifier = modifier.fillMaxWidth()
+    )
+
+    if (showDialog) {
+        val state = rememberNepaliDatePickerState(
+            initialSelectedDate = DateUtils.toNepaliSimpleDate(selectedMillis)
+        )
+        NepaliDatePickerDialog(
+            onDismissRequest = { showDialog = false },
+            confirmButton = {
+                NepaliDatePickerDefaults.DialogButton(
+                    text = "OK",
+                    onButtonClick = {
+                        state.selectedEnglishDate?.let { english ->
+                            onDateSelected(
+                                DateUtils.fromEnglishCustomCalendar(
+                                    english.year, english.month, english.dayOfMonth
+                                )
+                            )
+                        }
+                        showDialog = false
+                    }
+                )
+            },
+            dismissButton = {
+                NepaliDatePickerDefaults.DialogButton(
+                    text = "Cancel",
+                    onButtonClick = { showDialog = false }
+                )
+            }
+        ) {
+            NepaliDatePicker(state = state)
         }
     }
 }

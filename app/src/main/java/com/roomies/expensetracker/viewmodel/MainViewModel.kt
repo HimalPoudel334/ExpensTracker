@@ -359,30 +359,33 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun expensesForMonth(refMillis: Long): List<Expense> =
         _expenses.value.filter { DateUtils.isSameBsMonth(it.dateMillis, refMillis) }
 
-    fun totalForMonth(refMillis: Long): Double =
-        expensesForMonth(refMillis).sumOf { it.amount }
+    /** Both bounds inclusive; expects local-noon millis per our storage convention. */
+    fun expensesInRange(startMillis: Long, endMillis: Long): List<Expense> =
+        _expenses.value.filter { it.dateMillis in startMillis..endMillis }
 
-    fun byPersonForMonth(refMillis: Long): Map<String, Double> =
-        expensesForMonth(refMillis).groupBy { it.paidBy }
+    fun totalOf(expenses: List<Expense>): Double = expenses.sumOf { it.amount }
+
+    fun byPersonOf(expenses: List<Expense>): Map<String, Double> =
+        expenses.groupBy { it.paidBy }
             .mapValues { entry -> entry.value.sumOf { it.amount } }
 
-    fun byCategoryForMonth(refMillis: Long): Map<String, Double> =
-        expensesForMonth(refMillis).groupBy { it.category }
+    fun byCategoryOf(expenses: List<Expense>): Map<String, Double> =
+        expenses.groupBy { it.category }
             .mapValues { entry -> entry.value.sumOf { it.amount } }
 
-    fun byPaymentMethodForMonth(refMillis: Long): Map<String, Double> =
-        expensesForMonth(refMillis).groupBy { it.paymentMethod }
+    fun byPaymentMethodOf(expenses: List<Expense>): Map<String, Double> =
+        expenses.groupBy { it.paymentMethod }
             .mapValues { entry -> entry.value.sumOf { it.amount } }
 
-    fun topItemsByAmount(refMillis: Long, limit: Int = 10): List<Pair<String, Double>> =
-        expensesForMonth(refMillis).groupBy { it.item }
+    fun topItemsByAmountOf(expenses: List<Expense>, limit: Int = 10): List<Pair<String, Double>> =
+        expenses.groupBy { it.item }
             .mapValues { entry -> entry.value.sumOf { it.amount } }
             .toList()
             .sortedByDescending { it.second }
             .take(limit)
 
-    fun topItemsByFrequency(refMillis: Long, limit: Int = 10): List<Pair<String, Int>> =
-        expensesForMonth(refMillis).groupBy { it.item }
+    fun topItemsByFrequencyOf(expenses: List<Expense>, limit: Int = 10): List<Pair<String, Int>> =
+        expenses.groupBy { it.item }
             .mapValues { entry -> entry.value.size }
             .toList()
             .sortedByDescending { it.second }
@@ -422,6 +425,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
+     * Net balance per member for an arbitrary set of expenses (a month or a
+     * custom range), using the group's CURRENT member list and honoring any
+     * custom splitAmong via Expense.shareFor. Settlements aren't applied
+     * here since they're not period-scoped the same way expenses are — see
+     * netBalances for the all-time, settlement-aware view used by Settle Up.
+     */
+    fun balancesOf(expenses: List<Expense>): Map<String, Double> {
+        val memberUids = activeGroup.value?.members ?: return emptyMap()
+        return computeExpenseBalances(memberUids, expenses)
+    }
+
+    /**
      * Net balance per member for the month, assuming every expense is split
      * equally among all current group members regardless of who was in the
      * group when the expense happened. Positive = owed money overall,
@@ -431,10 +446,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * applied here -- they're not month-scoped in the same way expenses are
      * (see netBalances for the all-time, settlement-aware view).
      */
-    fun balancesForMonth(refMillis: Long): Map<String, Double> {
-        val memberUids = activeGroup.value?.members ?: return emptyMap()
-        return computeExpenseBalances(memberUids, expensesForMonth(refMillis))
-    }
+    fun balancesForMonth(refMillis: Long): Map<String, Double> =
+        balancesOf(expensesForMonth(refMillis))
 
     /**
      * All-time balance per member for the active group: every expense ever
