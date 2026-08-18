@@ -7,9 +7,11 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.roomies.expensetracker.model.AppSettings
 import com.roomies.expensetracker.model.Group
+import com.roomies.expensetracker.model.Member
 import com.roomies.expensetracker.model.ShoppingItem
 import com.roomies.expensetracker.model.Expense
 import com.roomies.expensetracker.model.RecurringExpense
+import com.roomies.expensetracker.model.Settlement
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -33,6 +35,7 @@ object FirestoreRepository {
     private fun recurringRef(groupId: String) = groupDoc(groupId).collection("recurring")
     private fun settingsDoc(groupId: String) = groupDoc(groupId).collection("config").document("settings")
     private fun shoppingRef(groupId: String) = groupDoc(groupId).collection("shopping_list")
+    private fun settlementsRef(groupId: String) = groupDoc(groupId).collection("settlements")
 
     /** Groups the given user belongs to. Phase 4's group switcher/join flow builds on this. */
     fun observeGroupsForUser(uid: String): Flow<List<Group>> = callbackFlow {
@@ -73,12 +76,49 @@ object FirestoreRepository {
         awaitClose { listener.remove() }
     }
 
+    /**
+     * Full member details (name + email) for the Members dialog, as opposed to
+     * observeUsersByIds' bare uid -> displayName map used by pickers. Sorted
+     * by name so the list reads the same as the "Paid By" pickers do.
+     */
+    fun observeMemberDetails(uids: List<String>): Flow<List<Member>> = callbackFlow {
+        if (uids.isEmpty()) {
+            trySend(emptyList())
+            awaitClose { }
+            return@callbackFlow
+        }
+        val listener = db.collection("users")
+            .whereIn(FieldPath.documentId(), uids)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) return@addSnapshotListener
+                val list = snapshot?.documents?.map { doc ->
+                    val displayName = doc.getString("displayName")?.takeIf { it.isNotBlank() }
+                    val email = doc.getString("email") ?: ""
+                    val emailPrefix = email.substringBefore("@").takeIf { it.isNotBlank() }
+                    Member(uid = doc.id, displayName = displayName ?: emailPrefix ?: doc.id, email = email)
+                }?.sortedBy { it.displayName.lowercase() } ?: emptyList()
+                trySend(list)
+            }
+        awaitClose { listener.remove() }
+    }
+
+    /**
+     * Removes a member other than the creator from the group. Intended for
+     * creator-only use from the UI; the Firestore security rules (managed in
+     * the console, not this repo) are the actual enforcement boundary and
+     * should confirm request.auth.uid == createdBy before allowing this write.
+     */
+    suspend fun removeMember(groupId: String, uid: String) {
+        groupDoc(groupId).update("members", FieldValue.arrayRemove(uid)).await()
+    }
+
     suspend fun createGroup(name: String, uid: String): String {
         val doc = groupsRef.document()
         val data = mapOf(
             "name" to name,
             "members" to listOf(uid),
-            "createdBy" to uid
+            "createdBy" to uid,
+            "admins" to emptyList<String>()
         )
         doc.set(data).await()
         return doc.id
@@ -154,6 +194,19 @@ object FirestoreRepository {
         awaitClose { listener.remove() }
     }
 
+    /**
+     * One-shot (non-listening) fetch of every expense a group has ever had.
+     * Used to check a member is settled up before letting them leave a group
+     * that may not be the currently active one (whose _expenses StateFlow
+     * only ever holds the active group's data).
+     */
+    suspend fun getExpensesOnce(groupId: String): List<Expense> {
+        val snapshot = expensesRef(groupId).get().await()
+        return snapshot.documents.mapNotNull { doc ->
+            doc.toObject(Expense::class.java)?.apply { id = doc.id }
+        }
+    }
+
     suspend fun addExpense(groupId: String, expense: Expense) {
         expensesRef(groupId).add(expense).await()
     }
@@ -164,6 +217,39 @@ object FirestoreRepository {
 
     suspend fun deleteExpense(groupId: String, id: String) {
         expensesRef(groupId).document(id).delete().await()
+    }
+
+    fun observeSettlements(groupId: String): Flow<List<Settlement>> = callbackFlow {
+        val listener = settlementsRef(groupId)
+            .orderBy("dateMillis", Query.Direction.DESCENDING)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) return@addSnapshotListener
+                val list = snapshot?.documents?.mapNotNull { doc ->
+                    doc.toObject(Settlement::class.java)?.apply { id = doc.id }
+                } ?: emptyList()
+                trySend(list)
+            }
+        awaitClose { listener.remove() }
+    }
+
+    /**
+     * One-shot fetch of every settlement a group has ever recorded, for the
+     * same reason getExpensesOnce exists: checking a member's lifetime
+     * balance for a group that may not be the currently active one.
+     */
+    suspend fun getSettlementsOnce(groupId: String): List<Settlement> {
+        val snapshot = settlementsRef(groupId).get().await()
+        return snapshot.documents.mapNotNull { doc ->
+            doc.toObject(Settlement::class.java)?.apply { id = doc.id }
+        }
+    }
+
+    suspend fun addSettlement(groupId: String, settlement: Settlement) {
+        settlementsRef(groupId).add(settlement).await()
+    }
+
+    suspend fun deleteSettlement(groupId: String, id: String) {
+        settlementsRef(groupId).document(id).delete().await()
     }
 
     fun observeRecurring(groupId: String): Flow<List<RecurringExpense>> = callbackFlow {

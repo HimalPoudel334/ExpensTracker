@@ -8,16 +8,25 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -85,18 +94,56 @@ fun AppRoot(viewModel: MainViewModel) {
             NavigationBar {
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val currentRoute = navBackStackEntry?.destination?.route
-                bottomNavItems.forEach { screen ->
+
+                fun navigateTo(route: String) {
+                    navController.navigate(route) {
+                        popUpTo(navController.graph.findStartDestination().id) {
+                            saveState = true
+                        }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                }
+
+                val half = bottomNavItems.size / 2
+                bottomNavItems.take(half).forEach { screen ->
                     NavigationBarItem(
                         selected = currentRoute == screen.route,
-                        onClick = {
-                            navController.navigate(screen.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
-                                }
-                                launchSingleTop = true
-                                restoreState = true
+                        onClick = { navigateTo(screen.route) },
+                        icon = { Icon(screen.icon, contentDescription = screen.label) },
+                        label = { Text(screen.label) }
+                    )
+                }
+
+                // Prominent but bar-contained "Add" item: a filled circle behind the
+                // icon instead of a raised Scaffold FAB, so it never pops out above
+                // the bar's own bounds.
+                val isOnAdd = currentRoute == Screen.Add.route
+                NavigationBarItem(
+                    selected = isOnAdd,
+                    onClick = { navigateTo(Screen.Add.route) },
+                    icon = {
+                        Surface(
+                            shape = CircleShape,
+                            color = if (isOnAdd) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Filled.Add,
+                                    contentDescription = Screen.Add.label,
+                                    tint = if (isOnAdd) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onPrimaryContainer
+                                )
                             }
-                        },
+                        }
+                    },
+                    label = { Text(Screen.Add.label) }
+                )
+
+                bottomNavItems.drop(half).forEach { screen ->
+                    NavigationBarItem(
+                        selected = currentRoute == screen.route,
+                        onClick = { navigateTo(screen.route) },
                         icon = { Icon(screen.icon, contentDescription = screen.label) },
                         label = { Text(screen.label) }
                     )

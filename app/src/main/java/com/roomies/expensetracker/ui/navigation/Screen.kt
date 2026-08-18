@@ -22,10 +22,8 @@ sealed class Screen(val route: String, val label: String, val icon: ImageVector)
 }
 
 val bottomNavItems = listOf(
-    Screen.Add,
     Screen.Expenses,
     Screen.Shopping,
     Screen.Reports,
-    Screen.Recurring,
     Screen.Settings
 )

@@ -74,6 +74,19 @@ fun SettingsScreen(viewModel: MainViewModel, navController: NavHostController) {
         }
 
         HorizontalDivider()
+        Text("Recurring Expenses", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "Set up expenses that repeat automatically, like rent or subscriptions.",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        OutlinedButton(
+            onClick = { navController.navigate(Screen.Recurring.route) },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Manage Recurring Expenses")
+        }
+
+        HorizontalDivider()
         Text("Account", style = MaterialTheme.typography.titleMedium)
         Text(
             currentUser?.email ?: currentUser?.displayName ?: "Signed in",

@@ -29,6 +29,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.roomies.expensetracker.data.AuthManager
 import com.roomies.expensetracker.model.Expense
+import com.roomies.expensetracker.model.canManagePayers
 import com.roomies.expensetracker.util.Constants
 import com.roomies.expensetracker.util.DateUtils
 import com.roomies.expensetracker.viewmodel.MainViewModel
@@ -46,7 +47,9 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
     val expenses by viewModel.expenses.collectAsState()
     val members by viewModel.members.collectAsState()
     val pendingItem by viewModel.pendingShoppingItem.collectAsState()
+    val activeGroup by viewModel.activeGroup.collectAsState()
     val currentUid = AuthManager.currentUser.collectAsState().value?.uid.orEmpty()
+    val canChoosePayer = activeGroup?.canManagePayers(currentUid) ?: false
 
     var amount by remember { mutableStateOf("") }
     var item by remember { mutableStateOf("") }
@@ -57,8 +60,17 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
     var selectedDateMillis by remember { mutableLongStateOf(DateUtils.todayLocalNoon()) }
     var showDatePicker by remember { mutableStateOf(false) }
     var showConfirmation by remember { mutableStateOf(false) }
+    var useCustomSplit by remember { mutableStateOf(false) }
+    var splitValues by remember { mutableStateOf(emptyMap<String, String>()) }
 
-    // Pre-fill from shopping list if navigated from "Add as Expense"
+    // Whoever is attributed as payer decides how THIS expense is split; a
+    // creator/admin can additionally edit anyone's split (matching their
+    // "Paid By" override privilege).
+    val canEditSplit = canChoosePayer || paidBy == currentUid
+
+    // Pre-fill from shopping list if navigated from "Add as Expense". Only a
+    // privileged (creator/admin) user gets the item's original payer carried
+    // over -- everyone else's expenses are always attributed to themselves.
     LaunchedEffect(pendingItem) {
         pendingItem?.let {
             item = it.name
@@ -69,13 +81,16 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
                     append(it.note)
                 }
             }
-            paidBy = it.addedBy.ifBlank { currentUid }
+            paidBy = if (canChoosePayer) it.addedBy.ifBlank { currentUid } else currentUid
             // Do NOT clear pendingItem here — we need the ID when saving
         }
     }
 
-    LaunchedEffect(currentUid) {
-        if (paidBy.isBlank()) paidBy = currentUid
+    // Non-privileged members are always locked to themselves as payer; a
+    // creator/admin can pick freely (see MemberDropdownField vs the read-only
+    // field below).
+    LaunchedEffect(canChoosePayer, currentUid) {
+        if (!canChoosePayer || paidBy.isBlank()) paidBy = currentUid
     }
 
     val itemSuggestions = remember(expenses, item) {
@@ -148,12 +163,34 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
             onSelected = { paymentMethod = it }
         )
 
-        MemberDropdownField(
-            label = "Paid By",
-            members = members,
-            selectedUid = paidBy,
-            onSelected = { paidBy = it }
-        )
+        if (canChoosePayer) {
+            MemberDropdownField(
+                label = "Paid By",
+                members = members,
+                selectedUid = paidBy,
+                onSelected = { paidBy = it }
+            )
+        } else {
+            OutlinedTextField(
+                value = members.find { it.first == currentUid }?.second ?: "You",
+                onValueChange = {},
+                readOnly = true,
+                label = { Text("Paid By") },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        if (canEditSplit) {
+            SplitEditor(
+                members = members,
+                totalAmount = amount.toDoubleOrNull() ?: 0.0,
+                currencySymbol = settings.currencySymbol,
+                useCustom = useCustomSplit,
+                onUseCustomChange = { useCustomSplit = it },
+                splitValues = splitValues,
+                onSplitValuesChange = { splitValues = it }
+            )
+        }
 
         OutlinedTextField(
             value = notes,
@@ -162,9 +199,11 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
             modifier = Modifier.fillMaxWidth()
         )
 
+        val amt = amount.toDoubleOrNull()
+        val splitOk = !canEditSplit || isSplitValid(useCustomSplit, amt ?: 0.0, splitValues)
+
         Button(
             onClick = {
-                val amt = amount.toDoubleOrNull()
                 if (amt != null && amt > 0 && item.isNotBlank()) {
                     viewModel.addExpense(
                         Expense(
@@ -172,9 +211,10 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
                             item = item.trim(),
                             category = category,
                             paymentMethod = paymentMethod,
-                            paidBy = paidBy,
+                            paidBy = if (canChoosePayer) paidBy else currentUid,
                             dateMillis = selectedDateMillis,
-                            notes = notes.trim()
+                            notes = notes.trim(),
+                            splitAmong = if (canEditSplit) resolveSplitAmong(useCustomSplit, splitValues) else emptyMap()
                         )
                     )
                     // Now that expense is saved, remove the shopping item it came from
@@ -186,9 +226,12 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
                     item = ""
                     notes = ""
                     selectedDateMillis = DateUtils.todayLocalNoon()
+                    useCustomSplit = false
+                    splitValues = emptyMap()
                     showConfirmation = true
                 }
             },
+            enabled = amt != null && amt > 0 && item.isNotBlank() && splitOk,
             modifier = Modifier.fillMaxWidth()
         ) {
             Text("Save Expense")

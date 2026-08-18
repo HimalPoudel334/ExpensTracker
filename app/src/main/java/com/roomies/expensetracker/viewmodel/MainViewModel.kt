@@ -12,10 +12,15 @@ import com.roomies.expensetracker.data.GroupPreference
 import com.roomies.expensetracker.model.AppSettings
 import com.roomies.expensetracker.model.Expense
 import com.roomies.expensetracker.model.Group
+import com.roomies.expensetracker.model.Member
 import com.roomies.expensetracker.model.RecurringExpense
+import com.roomies.expensetracker.model.Settlement
 import com.roomies.expensetracker.model.ShoppingItem
+import com.roomies.expensetracker.model.SuggestedSettlement
+import com.roomies.expensetracker.model.shareFor
 import com.roomies.expensetracker.util.DateUtils
 import com.roomies.expensetracker.util.NotificationHelper
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -68,8 +73,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             .sortedBy { it.second.lowercase() }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    /** Signed-in user's uid, for comparing against a group's createdBy in the UI. */
+    val currentUserId: StateFlow<String?> = AuthManager.currentUser
+        .map { it?.uid }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AuthManager.currentUser.value?.uid)
+
     private val _expenses = MutableStateFlow<List<Expense>>(emptyList())
     val expenses: StateFlow<List<Expense>> = _expenses.asStateFlow()
+
+    private val _settlements = MutableStateFlow<List<Settlement>>(emptyList())
+    val settlements: StateFlow<List<Settlement>> = _settlements.asStateFlow()
 
     private val _recurring = MutableStateFlow<List<RecurringExpense>>(emptyList())
     val recurring: StateFlow<List<RecurringExpense>> = _recurring.asStateFlow()
@@ -124,6 +137,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     }
                     _expenses.value = list
                 }
+        }
+        viewModelScope.launch {
+            groupIdFlow.filterNotNull()
+                .flatMapLatest { groupId -> FirestoreRepository.observeSettlements(groupId) }
+                .collect { _settlements.value = it }
         }
         viewModelScope.launch {
             groupIdFlow.filterNotNull()
@@ -208,16 +226,48 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { FirestoreRepository.renameGroup(groupId, newName.trim()) }
     }
 
-    /** Leaving the currently active group falls back to whichever group is next in the list, if any. */
-    fun leaveGroup(groupId: String) {
+    /**
+     * Leaving the currently active group falls back to whichever group is
+     * next in the list, if any. Blocked until the member's lifetime balance
+     * in this group is near zero -- onBlocked receives a human-readable
+     * reason so the UI can surface it instead of silently doing nothing.
+     */
+    fun leaveGroup(group: Group, onBlocked: (String) -> Unit = {}) {
         val uid = AuthManager.currentUser.value?.uid ?: return
         viewModelScope.launch {
-            FirestoreRepository.leaveGroup(groupId, uid)
-            if (_selectedGroupId.value == groupId) {
+            val balance = lifetimeBalance(group, uid)
+            if (kotlin.math.abs(balance) > 0.5) {
+                onBlocked(
+                    if (balance > 0)
+                        "You're still owed money in \"${group.name}\". Settle up before leaving."
+                    else
+                        "You still owe money in \"${group.name}\". Settle up before leaving."
+                )
+                return@launch
+            }
+            FirestoreRepository.leaveGroup(group.id, uid)
+            if (_selectedGroupId.value == group.id) {
                 _selectedGroupId.value = null
                 GroupPreference.clearSelectedGroupId(context, uid)
             }
         }
+    }
+
+    /** Full member details (name + email) for any group in the list — feeds the Members dialog. */
+    fun observeMemberDetails(uids: List<String>): Flow<List<Member>> =
+        FirestoreRepository.observeMemberDetails(uids)
+
+    /**
+     * Creator-only: removes another member from the given group. No-ops if
+     * the caller isn't that group's creator or is trying to remove
+     * themselves (the creator leaves via deleting/leaving the group, not
+     * this action) -- this is a UI-level guard, not a security boundary, so
+     * Firestore rules must independently enforce createdBy on this write.
+     */
+    fun removeMember(group: Group, uid: String) {
+        val currentUid = AuthManager.currentUser.value?.uid ?: return
+        if (group.createdBy != currentUid || uid == group.createdBy) return
+        viewModelScope.launch { FirestoreRepository.removeMember(group.id, uid) }
     }
 
     /** Generates a 72-hour invite code for the given group and returns it via callback. */
@@ -339,22 +389,132 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             .take(limit)
 
     /**
+     * Shared balance math used by both the monthly report and the lifetime
+     * settlement check. Uses Expense.shareFor, so an expense with a custom
+     * splitAmong is honored; otherwise it falls back to an equal split
+     * across memberUids.
+     */
+    private fun computeExpenseBalances(memberUids: List<String>, expenses: List<Expense>): Map<String, Double> {
+        if (memberUids.isEmpty()) return emptyMap()
+        val balances = memberUids.associateWith { 0.0 }.toMutableMap()
+        expenses.forEach { expense ->
+            memberUids.forEach { uid ->
+                balances[uid] = (balances[uid] ?: 0.0) - expense.shareFor(uid, memberUids)
+            }
+            balances[expense.paidBy] = (balances[expense.paidBy] ?: 0.0) + expense.amount
+        }
+        return balances
+    }
+
+    /**
+     * Applies recorded settlements on top of expense-derived balances: paying
+     * someone moves the payer's balance up (less owed) and the payee's
+     * balance down (less owed to them), regardless of which month the
+     * underlying expenses were in.
+     */
+    private fun applySettlements(balances: Map<String, Double>, settlements: List<Settlement>): Map<String, Double> {
+        val result = balances.toMutableMap()
+        settlements.forEach { s ->
+            result[s.fromUid] = (result[s.fromUid] ?: 0.0) + s.amount
+            result[s.toUid] = (result[s.toUid] ?: 0.0) - s.amount
+        }
+        return result
+    }
+
+    /**
      * Net balance per member for the month, assuming every expense is split
      * equally among all current group members regardless of who was in the
      * group when the expense happened. Positive = owed money overall,
      * negative = owes money overall. Uses the group's CURRENT member list
      * (not historical), which is the simplest correct behavior for a
-     * household that rarely changes members mid-month.
+     * household that rarely changes members mid-month. Settlements aren't
+     * applied here -- they're not month-scoped in the same way expenses are
+     * (see netBalances for the all-time, settlement-aware view).
      */
     fun balancesForMonth(refMillis: Long): Map<String, Double> {
         val memberUids = activeGroup.value?.members ?: return emptyMap()
-        if (memberUids.isEmpty()) return emptyMap()
-        val balances = memberUids.associateWith { 0.0 }.toMutableMap()
-        expensesForMonth(refMillis).forEach { expense ->
-            val share = expense.amount / memberUids.size
-            memberUids.forEach { uid -> balances[uid] = (balances[uid] ?: 0.0) - share }
-            balances[expense.paidBy] = (balances[expense.paidBy] ?: 0.0) + expense.amount
+        return computeExpenseBalances(memberUids, expensesForMonth(refMillis))
+    }
+
+    /**
+     * All-time balance per member for the active group: every expense ever
+     * recorded, adjusted by every settlement ever recorded. This is the
+     * "who actually owes whom right now" view that Settle Up acts on.
+     */
+    val netBalances: StateFlow<Map<String, Double>> = combine(activeGroup, _expenses, _settlements) { group, expenses, settlements ->
+        val memberUids = group?.members ?: return@combine emptyMap()
+        applySettlements(computeExpenseBalances(memberUids, expenses), settlements)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
+    /**
+     * Simplifies netBalances into the smallest practical set of payments
+     * that would settle the group up completely -- e.g. instead of "A owes
+     * B ₹200, B owes C ₹200" this suggests "A pays C ₹200" directly. Greedy
+     * largest-debtor-pays-largest-creditor heuristic: not guaranteed to be
+     * the mathematically globally-minimal transaction count in every case,
+     * but it's what most bill-splitting apps use and never needs more than
+     * (members with a nonzero balance - 1) transactions.
+     */
+    val simplifiedSettlements: StateFlow<List<SuggestedSettlement>> = netBalances
+        .map { balances -> simplifyDebts(balances) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private fun simplifyDebts(balances: Map<String, Double>): List<SuggestedSettlement> {
+        val creditors = balances.filter { it.value > 0.5 }
+            .map { it.key to it.value }
+            .sortedByDescending { it.second }
+            .toMutableList()
+        val debtors = balances.filter { it.value < -0.5 }
+            .map { it.key to -it.value }
+            .sortedByDescending { it.second }
+            .toMutableList()
+
+        val result = mutableListOf<SuggestedSettlement>()
+        var ci = 0
+        var di = 0
+        while (ci < creditors.size && di < debtors.size) {
+            val (creditorUid, creditAmt) = creditors[ci]
+            val (debtorUid, debtAmt) = debtors[di]
+            val settleAmt = minOf(creditAmt, debtAmt)
+            if (settleAmt > 0.5) {
+                result.add(SuggestedSettlement(fromUid = debtorUid, toUid = creditorUid, amount = settleAmt))
+            }
+            creditors[ci] = creditorUid to (creditAmt - settleAmt)
+            debtors[di] = debtorUid to (debtAmt - settleAmt)
+            if (creditors[ci].second <= 0.5) ci++
+            if (debtors[di].second <= 0.5) di++
         }
-        return balances
+        return result
+    }
+
+    /** Records a direct payment between two members of the active group, adjusting netBalances immediately. */
+    fun recordSettlement(fromUid: String, toUid: String, amount: Double, note: String = "") {
+        val groupId = activeGroupId ?: return
+        if (fromUid == toUid || amount <= 0.0) return
+        viewModelScope.launch {
+            FirestoreRepository.addSettlement(
+                groupId,
+                Settlement(fromUid = fromUid, toUid = toUid, amount = amount, note = note.trim())
+            )
+        }
+    }
+
+    fun deleteSettlement(id: String) {
+        val groupId = activeGroupId ?: return
+        viewModelScope.launch { FirestoreRepository.deleteSettlement(groupId, id) }
+    }
+
+    /**
+     * This member's lifetime balance for the given group (not just the
+     * active month), fetched fresh so it works even for a group that isn't
+     * currently active. Includes settlements, same as netBalances. A
+     * threshold of 0.5 currency units treats tiny rounding drift as
+     * settled. Used to block "Leave" until settled up.
+     */
+    private suspend fun lifetimeBalance(group: Group, uid: String): Double {
+        if (group.members.isEmpty()) return 0.0
+        val expenses = FirestoreRepository.getExpensesOnce(group.id)
+        val settlements = FirestoreRepository.getSettlementsOnce(group.id)
+        return applySettlements(computeExpenseBalances(group.members, expenses), settlements)[uid] ?: 0.0
     }
 }

@@ -36,7 +36,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.roomies.expensetracker.data.AuthManager
 import com.roomies.expensetracker.model.Expense
+import com.roomies.expensetracker.model.canManagePayers
 import com.roomies.expensetracker.util.Constants
 import com.roomies.expensetracker.util.DateUtils
 import com.roomies.expensetracker.viewmodel.MainViewModel
@@ -124,6 +126,11 @@ fun ExpenseRow(expense: Expense, memberNames: Map<String, String>, onClick: () -
 @Composable
 fun EditExpenseDialog(expense: Expense, viewModel: MainViewModel, onDismiss: () -> Unit) {
     val members by viewModel.members.collectAsState()
+    val activeGroup by viewModel.activeGroup.collectAsState()
+    val settings by viewModel.settings.collectAsState()
+    val currentUid = AuthManager.currentUser.collectAsState().value?.uid.orEmpty()
+    val canChoosePayer = activeGroup?.canManagePayers(currentUid) ?: false
+
     var amount by remember { mutableStateOf(expense.amount.toString()) }
     var item by remember { mutableStateOf(expense.item) }
     var category by remember { mutableStateOf(expense.category) }
@@ -132,6 +139,14 @@ fun EditExpenseDialog(expense: Expense, viewModel: MainViewModel, onDismiss: () 
     var notes by remember { mutableStateOf(expense.notes) }
     var selectedDateMillis by remember { mutableLongStateOf(expense.dateMillis) }
     var showDatePicker by remember { mutableStateOf(false) }
+    var useCustomSplit by remember { mutableStateOf(expense.splitAmong.isNotEmpty()) }
+    var splitValues by remember {
+        mutableStateOf(expense.splitAmong.mapValues { (_, v) -> v.toString() })
+    }
+
+    // Whoever is attributed as payer decides how THIS expense is split; a
+    // creator/admin can additionally edit anyone's split, same as Add.
+    val canEditSplit = canChoosePayer || paidBy == currentUid
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -170,7 +185,28 @@ fun EditExpenseDialog(expense: Expense, viewModel: MainViewModel, onDismiss: () 
                 )
                 DropdownField("Category", Constants.CATEGORIES, category) { category = it }
                 DropdownField("Payment Method", Constants.PAYMENT_METHODS, paymentMethod) { paymentMethod = it }
-                MemberDropdownField("Paid By", members, paidBy) { paidBy = it }
+                if (canChoosePayer) {
+                    MemberDropdownField("Paid By", members, paidBy) { paidBy = it }
+                } else {
+                    OutlinedTextField(
+                        value = members.find { it.first == paidBy }?.second ?: paidBy,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Paid By") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                if (canEditSplit) {
+                    SplitEditor(
+                        members = members,
+                        totalAmount = amount.toDoubleOrNull() ?: 0.0,
+                        currencySymbol = settings.currencySymbol,
+                        useCustom = useCustomSplit,
+                        onUseCustomChange = { useCustomSplit = it },
+                        splitValues = splitValues,
+                        onSplitValuesChange = { splitValues = it }
+                    )
+                }
                 OutlinedTextField(
                     value = notes,
                     onValueChange = { notes = it },
@@ -189,23 +225,28 @@ fun EditExpenseDialog(expense: Expense, viewModel: MainViewModel, onDismiss: () 
                     Text("Delete")
                 }
                 Spacer(modifier = Modifier.width(8.dp))
-                Button(onClick = {
-                    val amt = amount.toDoubleOrNull()
-                    if (amt != null && amt > 0 && item.isNotBlank()) {
-                        viewModel.updateExpense(
-                            expense.copy(
-                                amount = amt,
-                                item = item.trim(),
-                                category = category,
-                                paymentMethod = paymentMethod,
-                                paidBy = paidBy,
-                                dateMillis = selectedDateMillis,
-                                notes = notes.trim()
+                val amt = amount.toDoubleOrNull()
+                val splitOk = !canEditSplit || isSplitValid(useCustomSplit, amt ?: 0.0, splitValues)
+                Button(
+                    onClick = {
+                        if (amt != null && amt > 0 && item.isNotBlank()) {
+                            viewModel.updateExpense(
+                                expense.copy(
+                                    amount = amt,
+                                    item = item.trim(),
+                                    category = category,
+                                    paymentMethod = paymentMethod,
+                                    paidBy = if (canChoosePayer) paidBy else expense.paidBy,
+                                    dateMillis = selectedDateMillis,
+                                    notes = notes.trim(),
+                                    splitAmong = if (canEditSplit) resolveSplitAmong(useCustomSplit, splitValues) else expense.splitAmong
+                                )
                             )
-                        )
-                        onDismiss()
-                    }
-                }) {
+                            onDismiss()
+                        }
+                    },
+                    enabled = amt != null && amt > 0 && item.isNotBlank() && splitOk
+                ) {
                     Text("Save")
                 }
             }

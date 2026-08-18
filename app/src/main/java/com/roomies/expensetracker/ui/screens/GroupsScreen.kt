@@ -5,28 +5,36 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AdminPanelSettings
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Group as GroupIcon
 import androidx.compose.material.icons.filled.GroupAdd
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -41,6 +49,7 @@ import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.unit.dp
 import com.roomies.expensetracker.model.Group
+import com.roomies.expensetracker.model.Member
 import com.roomies.expensetracker.viewmodel.MainViewModel
 import kotlinx.coroutines.launch
 
@@ -56,6 +65,9 @@ fun GroupsScreen(viewModel: MainViewModel) {
     var groupToRename by remember { mutableStateOf<Group?>(null) }
     var groupToLeave by remember { mutableStateOf<Group?>(null) }
     var groupToInvite by remember { mutableStateOf<Group?>(null) }
+    var groupToViewMembers by remember { mutableStateOf<Group?>(null) }
+    var memberToRemove by remember { mutableStateOf<Pair<Group, Member>?>(null) }
+    var leaveBlockedMessage by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
         floatingActionButton = {
@@ -97,7 +109,8 @@ fun GroupsScreen(viewModel: MainViewModel) {
                             onSelect = { viewModel.selectGroup(group.id) },
                             onRename = { groupToRename = group },
                             onLeave = { groupToLeave = group },
-                            onInvite = { groupToInvite = group }
+                            onInvite = { groupToInvite = group },
+                            onMembers = { groupToViewMembers = group }
                         )
                     }
                 }
@@ -141,12 +154,23 @@ fun GroupsScreen(viewModel: MainViewModel) {
             text = { Text("You'll lose access to this group's expenses unless someone invites you back.") },
             confirmButton = {
                 TextButton(onClick = {
-                    viewModel.leaveGroup(group.id)
+                    viewModel.leaveGroup(group) { message -> leaveBlockedMessage = message }
                     groupToLeave = null
                 }) { Text("Leave", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
                 TextButton(onClick = { groupToLeave = null }) { Text("Cancel") }
+            }
+        )
+    }
+
+    leaveBlockedMessage?.let { message ->
+        AlertDialog(
+            onDismissRequest = { leaveBlockedMessage = null },
+            title = { Text("Can't leave yet") },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = { leaveBlockedMessage = null }) { Text("Got it") }
             }
         )
     }
@@ -163,6 +187,38 @@ fun GroupsScreen(viewModel: MainViewModel) {
             }
         )
     }
+
+    groupToViewMembers?.let { group ->
+        val currentUserId by viewModel.currentUserId.collectAsState()
+        val memberDetails by remember(group.id, group.members) {
+            viewModel.observeMemberDetails(group.members)
+        }.collectAsState(initial = emptyList())
+
+        MembersSheet(
+            group = group,
+            members = memberDetails,
+            isCreator = group.createdBy == currentUserId,
+            onDismiss = { groupToViewMembers = null },
+            onRemove = { member -> memberToRemove = group to member }
+        )
+    }
+
+    memberToRemove?.let { (group, member) ->
+        AlertDialog(
+            onDismissRequest = { memberToRemove = null },
+            title = { Text("Remove ${member.displayName}?") },
+            text = { Text("They'll lose access to \"${group.name}\" and its expenses unless invited back.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.removeMember(group, member.uid)
+                    memberToRemove = null
+                }) { Text("Remove", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { memberToRemove = null }) { Text("Cancel") }
+            }
+        )
+    }
 }
 
 @Composable
@@ -172,7 +228,8 @@ private fun GroupRow(
     onSelect: () -> Unit,
     onRename: () -> Unit,
     onLeave: () -> Unit,
-    onInvite: () -> Unit
+    onInvite: () -> Unit,
+    onMembers: () -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -186,6 +243,9 @@ private fun GroupRow(
                     "${group.members.size} member${if (group.members.size == 1) "" else "s"}",
                     style = MaterialTheme.typography.bodySmall
                 )
+            }
+            IconButton(onClick = onMembers) {
+                Icon(Icons.Filled.GroupIcon, contentDescription = "View members")
             }
             IconButton(onClick = onInvite) {
                 Icon(Icons.Filled.Share, contentDescription = "Invite to group")
@@ -348,4 +408,108 @@ private fun JoinGroupDialog(
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
+}
+
+/**
+ * Lists every member's name and email in a bottom sheet rather than an
+ * AlertDialog -- AlertDialog's content area doesn't scroll well and gets
+ * cramped once a group has more than a handful of members, whereas a sheet
+ * with a LazyColumn (plus a search field) stays usable as the list grows.
+ * Only the group's creator sees the remove action, and never for
+ * themselves -- creators leave via deleting or leaving the group elsewhere,
+ * not by "removing" themselves here.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MembersSheet(
+    group: Group,
+    members: List<Member>,
+    isCreator: Boolean,
+    onDismiss: () -> Unit,
+    onRemove: (Member) -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var query by remember { mutableStateOf("") }
+
+    val filtered = remember(members, query) {
+        if (query.isBlank()) members
+        else members.filter {
+            it.displayName.contains(query, ignoreCase = true) || it.email.contains(query, ignoreCase = true)
+        }
+    }
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+            Text(
+                "Members of \"${group.name}\"",
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+
+            if (members.size > 6) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = { Text("Search members") },
+                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                )
+            }
+
+            when {
+                members.isEmpty() -> Text(
+                    "Loading members…",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(vertical = 24.dp)
+                )
+                filtered.isEmpty() -> Text(
+                    "No members match \"$query\"",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(vertical = 24.dp)
+                )
+                else -> LazyColumn(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)
+                ) {
+                    items(filtered, key = { it.uid }) { member ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(member.displayName, style = MaterialTheme.typography.titleSmall)
+                                    if (member.uid == group.createdBy) {
+                                        Icon(
+                                            Icons.Filled.AdminPanelSettings,
+                                            contentDescription = "Creator",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.padding(start = 6.dp)
+                                        )
+                                    }
+                                }
+                                if (member.email.isNotBlank()) {
+                                    Text(member.email, style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                            if (isCreator && member.uid != group.createdBy) {
+                                IconButton(onClick = { onRemove(member) }) {
+                                    Icon(
+                                        Icons.Filled.Delete,
+                                        contentDescription = "Remove ${member.displayName}",
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+                        }
+                        HorizontalDivider()
+                    }
+                }
+            }
+
+            TextButton(onClick = onDismiss, modifier = Modifier.padding(vertical = 12.dp)) {
+                Text("Close")
+            }
+        }
+    }
 }
