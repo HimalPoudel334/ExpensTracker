@@ -336,7 +336,7 @@ fun ReportsScreen(viewModel: MainViewModel) {
                                         style = MaterialTheme.typography.bodyMedium
                                     )
                                     Text(
-                                        DateUtils.formatDate(s.dateMillis),
+                                        DateUtils.formatNepali(s.dateMillis),
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
