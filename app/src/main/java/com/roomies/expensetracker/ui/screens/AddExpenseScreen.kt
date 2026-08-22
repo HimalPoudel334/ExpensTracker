@@ -25,7 +25,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.roomies.expensetracker.data.AuthManager
 import com.roomies.expensetracker.model.Expense
@@ -51,7 +55,7 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
     val currentUid = AuthManager.currentUser.collectAsState().value?.uid.orEmpty()
     val canChoosePayer = activeGroup?.canManagePayers(currentUid) ?: false
 
-    var amount by remember { mutableStateOf("") }
+    var amountFieldValue by remember { mutableStateOf(TextFieldValue("")) }
     var item by remember { mutableStateOf("") }
     var category by remember { mutableStateOf(Constants.CATEGORIES.first()) }
     var paymentMethod by remember { mutableStateOf(Constants.PAYMENT_METHODS.first()) }
@@ -62,6 +66,7 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
     var showConfirmation by remember { mutableStateOf(false) }
     var useCustomSplit by remember { mutableStateOf(false) }
     var splitValues by remember { mutableStateOf(emptyMap<String, String>()) }
+    val amountFocusRequester = remember { FocusRequester() }
 
     // Whoever is attributed as payer decides how THIS expense is split; a
     // creator/admin can additionally edit anyone's split (matching their
@@ -115,20 +120,33 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
     ) {
         Text("Add Expense", style = MaterialTheme.typography.headlineSmall)
 
-        OutlinedTextField(
-            value = amount,
-            onValueChange = { amount = it },
-            label = { Text("Amount (${settings.currencySymbol})") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            modifier = Modifier.fillMaxWidth()
-        )
-
         AutocompleteTextField(
             label = "Item / Description",
             value = item,
             suggestions = itemSuggestions,
             onValueChange = { item = it },
-            onSuggestionSelected = { item = it }
+            onSuggestionSelected = { selected ->
+                item = selected
+                val lastPrice = expenses
+                    .filter { it.item.equals(selected, ignoreCase = true) }
+                    .maxByOrNull { it.dateMillis }
+                    ?.amount
+                if (lastPrice != null) {
+                    val text = lastPrice.toString()
+                    amountFieldValue = TextFieldValue(text, selection = TextRange(0, text.length))
+                    amountFocusRequester.requestFocus()
+                }
+            }
+        )
+
+        OutlinedTextField(
+            value = amountFieldValue,
+            onValueChange = { amountFieldValue = it },
+            label = { Text("Amount (${settings.currencySymbol})") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusRequester(amountFocusRequester)
         )
 
         OutlinedTextField(
@@ -183,7 +201,7 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
         if (canEditSplit) {
             SplitEditor(
                 members = members,
-                totalAmount = amount.toDoubleOrNull() ?: 0.0,
+                totalAmount = amountFieldValue.text.toDoubleOrNull() ?: 0.0,
                 currencySymbol = settings.currencySymbol,
                 useCustom = useCustomSplit,
                 onUseCustomChange = { useCustomSplit = it },
@@ -199,7 +217,7 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
             modifier = Modifier.fillMaxWidth()
         )
 
-        val amt = amount.toDoubleOrNull()
+        val amt = amountFieldValue.text.toDoubleOrNull()
         val splitOk = !canEditSplit || isSplitValid(useCustomSplit, amt ?: 0.0, splitValues)
 
         Button(
@@ -222,7 +240,7 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
                         viewModel.deleteShoppingItem(it.id)
                         viewModel.clearPendingShoppingItem()
                     }
-                    amount = ""
+                    amountFieldValue = TextFieldValue("")
                     item = ""
                     notes = ""
                     selectedDateMillis = DateUtils.todayLocalNoon()

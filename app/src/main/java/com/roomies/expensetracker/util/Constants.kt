@@ -14,10 +14,10 @@ object Constants {
     )
 
     val PAYMENT_METHODS = listOf(
+        "Bank Transfer",
         "Cash",
         "eSewa",
         "Khalti",
-        "Bank Transfer",
         "Card",
         "Other"
     )
