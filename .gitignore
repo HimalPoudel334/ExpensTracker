@@ -13,3 +13,5 @@
 .externalNativeBuild
 .cxx
 local.properties
+/server/expense-tracker-firebase-service-account.json
+/server/target

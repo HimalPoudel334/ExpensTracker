@@ -1,7 +1,14 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     id("com.google.gms.google-services")
+}
+
+val localProperties = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
 }
 
 android {
@@ -17,6 +24,19 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Pulled from local.properties (gitignored) so the shared secret
+        // never ends up in the public repo. See README for setup.
+        buildConfigField(
+            "String",
+            "NOTIFY_SERVER_URL",
+            "\"${localProperties.getProperty("notifyServerUrl", "")}\""
+        )
+        buildConfigField(
+            "String",
+            "NOTIFY_SHARED_SECRET",
+            "\"${localProperties.getProperty("notifySharedSecret", "")}\""
+        )
     }
 
     buildTypes {
@@ -32,6 +52,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -58,6 +79,7 @@ dependencies {
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.auth)
     implementation(libs.firebase.firestore)
+    implementation(libs.firebase.messaging)
     implementation(libs.kotlinx.coroutines.play.services)
 
     implementation(libs.nepali.date.picker.ui)

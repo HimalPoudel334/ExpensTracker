@@ -95,11 +95,23 @@ object AuthManager {
     /** Creates/repairs users/{uid}. Safe to call repeatedly -- merge write, not overwrite. */
     private suspend fun ensureUserDoc(user: FirebaseUser) {
         try {
-            val userDoc = mapOf(
+            val userDoc = mutableMapOf<String, Any>(
                 "displayName" to (user.displayName ?: ""),
                 "email" to (user.email ?: ""),
                 "photoUrl" to (user.photoUrl?.toString() ?: "")
             )
+            // Best-effort: this device's current FCM token, so pushes (see
+            // PushNotifier) can reach it even when the app isn't running.
+            // Runs on every app open with an existing session (see the auth
+            // listener above), which is also how a token surviving a Firebase
+            // Messaging service restart gets re-synced without needing
+            // onNewToken to fire again.
+            try {
+                val token = com.google.firebase.messaging.FirebaseMessaging.getInstance().token.await()
+                userDoc["fcmTokens"] = com.google.firebase.firestore.FieldValue.arrayUnion(token)
+            } catch (e: Exception) {
+                Log.w("AuthManager", "Could not fetch FCM token", e)
+            }
             com.google.firebase.firestore.FirebaseFirestore.getInstance()
                 .collection("users").document(user.uid)
                 .set(userDoc, com.google.firebase.firestore.SetOptions.merge())

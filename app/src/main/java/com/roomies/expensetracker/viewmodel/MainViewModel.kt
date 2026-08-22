@@ -20,6 +20,7 @@ import com.roomies.expensetracker.model.SuggestedSettlement
 import com.roomies.expensetracker.model.shareFor
 import com.roomies.expensetracker.util.DateUtils
 import com.roomies.expensetracker.util.NotificationHelper
+import com.roomies.expensetracker.util.PushNotifier
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -179,7 +180,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun addShoppingItem(item: ShoppingItem) {
         val groupId = activeGroupId ?: return
-        viewModelScope.launch { FirestoreRepository.addShoppingItem(groupId, item) }
+        viewModelScope.launch {
+            FirestoreRepository.addShoppingItem(groupId, item)
+            notifyOtherMembers(
+                excludeUid = item.addedBy,
+                title = "New Shopping Item",
+                body = "${memberNames.value[item.addedBy] ?: "Someone"} added \"${item.name}\" to the list",
+                channelId = "shopping_list",
+                data = mapOf("type" to "shopping_item", "groupId" to groupId)
+            )
+        }
     }
 
     fun updateShoppingItem(item: ShoppingItem) {
@@ -295,9 +305,40 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Fans a push out to every current group member except [excludeUid]
+     * (the person who just made the change -- no point notifying yourself).
+     * Fire-and-forget: failures are logged inside PushNotifier, never shown
+     * to the user, since this is purely the "your phone was closed" fallback
+     * on top of the live in-app notification that already covers everyone
+     * with the app open (see the listener setup above).
+     */
+    private suspend fun notifyOtherMembers(
+        excludeUid: String,
+        title: String,
+        body: String,
+        channelId: String,
+        data: Map<String, String>
+    ) {
+        val otherUids = (activeGroup.value?.members ?: emptyList()).filter { it != excludeUid }
+        if (otherUids.isEmpty()) return
+        val tokensByUid = FirestoreRepository.getFcmTokens(otherUids)
+        PushNotifier.notify(tokensByUid, title, body, channelId, data)
+    }
+
     fun addExpense(expense: Expense) {
         val groupId = activeGroupId ?: return
-        viewModelScope.launch { FirestoreRepository.addExpense(groupId, expense) }
+        viewModelScope.launch {
+            FirestoreRepository.addExpense(groupId, expense)
+            notifyOtherMembers(
+                excludeUid = expense.paidBy,
+                title = "New Expense",
+                body = "${memberNames.value[expense.paidBy] ?: "Someone"} added \"${expense.item}\" \u2014 " +
+                    "${settings.value.currencySymbol} ${"%.2f".format(expense.amount)}",
+                channelId = "expense_updates",
+                data = mapOf("type" to "expense", "groupId" to groupId)
+            )
+        }
     }
 
     fun updateExpense(expense: Expense) {

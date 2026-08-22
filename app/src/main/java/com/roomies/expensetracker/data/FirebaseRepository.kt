@@ -77,6 +77,29 @@ object FirestoreRepository {
     }
 
     /**
+     * One-shot (not a live listener): uid -> that user's registered FCM
+     * tokens, fetched right when we're about to fan out a push. A user can
+     * have more than one token (multiple devices signed in).
+     */
+    suspend fun getFcmTokens(uids: List<String>): Map<String, List<String>> {
+        if (uids.isEmpty()) return emptyMap()
+        val snapshot = db.collection("users")
+            .whereIn(FieldPath.documentId(), uids)
+            .get()
+            .await()
+        return snapshot.documents.associate { doc ->
+            val tokens = (doc.get("fcmTokens") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+            doc.id to tokens
+        }
+    }
+
+    /** Removes a single stale token (app uninstalled / FCM rotated it away) from a user's doc. */
+    fun removeFcmToken(uid: String, token: String) {
+        db.collection("users").document(uid)
+            .update("fcmTokens", FieldValue.arrayRemove(token))
+    }
+
+    /**
      * Full member details (name + email) for the Members dialog, as opposed to
      * observeUsersByIds' bare uid -> displayName map used by pickers. Sorted
      * by name so the list reads the same as the "Paid By" pickers do.

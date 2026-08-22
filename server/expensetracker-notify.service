@@ -1,0 +1,21 @@
+[Unit]
+Description=ExpenseTracker push notification relay
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/expensetracker-notify
+Environment=PORT=8080
+Environment=SHARED_SECRET=change-me
+Environment=FCM_PROJECT_ID=your-firebase-project-id
+Environment=GOOGLE_SERVICE_ACCOUNT_JSON=/etc/expensetracker-notify/service-account.json
+Restart=on-failure
+RestartSec=2
+User=www-data
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/etc/expensetracker-notify
+
+[Install]
+WantedBy=multi-user.target
