@@ -1,7 +1,10 @@
 package com.roomies.expensetracker.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,13 +18,18 @@ import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.roomies.expensetracker.model.SplitMode
 import com.roomies.expensetracker.util.DateUtils
 import dev.shivathapaa.nepalidatepickerkmp.NepaliDatePicker
 import dev.shivathapaa.nepalidatepickerkmp.NepaliDatePickerDialog
@@ -194,84 +203,201 @@ fun NepaliDatePickerField(
 }
 
 /**
- * Lets the user optionally override an expense's equal split. When
- * `useCustom` is false, `splitAmong` stays empty and Expense.shareFor falls
- * back to an equal split (the pre-existing behavior) -- so nothing changes
- * for anyone who never touches this. When true, each member gets an
- * editable amount and the caller should block saving until they sum to the
- * expense total (see the "Allocated ... of ..." line, which turns to an
- * error color when it doesn't match).
+ * Lets the user choose how an expense is split:
+ * - EQUAL: divided evenly among a checked subset of members. Whoever is
+ *   checked when the expense is saved is who it's split among, permanently
+ *   -- adding or removing a group member later never changes it (see
+ *   resolveSplitAmong). Defaults to everyone currently in the group.
+ * - MANUAL: an editable amount per member, unchanged from before.
+ * - ON_ME: the whole amount stays with the payer; nothing owed by anyone else.
  *
- * State (useCustom, splitValues) is hoisted to the caller so Add and Edit
- * screens can initialize it differently (Add: off by default; Edit: on and
- * pre-filled if the expense already has a custom splitAmong).
+ * State (mode, equalParticipants, splitValues) is hoisted to the caller so
+ * Add and Edit screens can initialize it differently (Add: EQUAL/everyone
+ * by default; Edit: pre-filled from the expense's existing splitAmong via
+ * Expense.inferredSplitMode).
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SplitEditor(
     members: List<Pair<String, String>>,
     totalAmount: Double,
     currencySymbol: String,
-    useCustom: Boolean,
-    onUseCustomChange: (Boolean) -> Unit,
+    mode: SplitMode,
+    onModeChange: (SplitMode) -> Unit,
+    equalParticipants: Set<String>,
+    onEqualParticipantsChange: (Set<String>) -> Unit,
     splitValues: Map<String, String>,
     onSplitValuesChange: (Map<String, String>) -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Split this expense manually", style = MaterialTheme.typography.bodyMedium)
-            Switch(checked = useCustom, onCheckedChange = onUseCustomChange)
-        }
-
-        if (useCustom) {
-            Spacer(modifier = Modifier.height(4.dp))
-            members.forEach { (uid, name) ->
-                OutlinedTextField(
-                    value = splitValues[uid] ?: "",
-                    onValueChange = { value -> onSplitValuesChange(splitValues + (uid to value)) },
-                    label = { Text(name) },
-                    prefix = { Text(currencySymbol) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                )
+    var equalPickerExpanded by remember { mutableStateOf(false) }
+    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text("Split", style = MaterialTheme.typography.bodyMedium)
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                SegmentedButton(
+                    selected = mode == SplitMode.EQUAL,
+                    onClick = { onModeChange(SplitMode.EQUAL) },
+                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 3),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                ) { Text("Equal") }
+                SegmentedButton(
+                    selected = mode == SplitMode.MANUAL,
+                    onClick = { onModeChange(SplitMode.MANUAL) },
+                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 3),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                ) { Text("Manual") }
+                SegmentedButton(
+                    selected = mode == SplitMode.ON_ME,
+                    onClick = { onModeChange(SplitMode.ON_ME) },
+                    shape = SegmentedButtonDefaults.itemShape(index = 2, count = 3),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                ) { Text("On Me") }
             }
-            val allocated = splitValues.values.sumOf { it.toDoubleOrNull() ?: 0.0 }
-            val remaining = totalAmount - allocated
-            val isBalanced = abs(remaining) <= 0.01
-            Text(
-                if (isBalanced) {
-                    "Allocated $currencySymbol${"%.2f".format(allocated)} of $currencySymbol${"%.2f".format(totalAmount)} ✓"
-                } else {
-                    "Allocated $currencySymbol${"%.2f".format(allocated)} of $currencySymbol${"%.2f".format(totalAmount)}" +
-                        " ($currencySymbol${"%.2f".format(remaining)} left)"
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = if (isBalanced) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(top = 4.dp)
-            )
+            Spacer(modifier = Modifier.height(4.dp))
+            when (mode) {
+                SplitMode.EQUAL -> {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            if (equalParticipants.size == members.size) {
+                                "Splitting among all ${members.size} members"
+                            } else {
+                                "Splitting among ${equalParticipants.size} of ${members.size} members"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = if (equalPickerExpanded) "Done" else "Change",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.clickable { equalPickerExpanded = !equalPickerExpanded }
+                        )
+                    }
+                    if (equalPickerExpanded) {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            members.forEach { (uid, name) ->
+                                val checked = equalParticipants.contains(uid)
+                                FilterChip(
+                                    selected = checked,
+                                    onClick = {
+                                        onEqualParticipantsChange(
+                                            if (checked) equalParticipants - uid else equalParticipants + uid
+                                        )
+                                    },
+                                    label = { Text(name) }
+                                )
+                            }
+                        }
+                    }
+                    if (equalParticipants.isNotEmpty()) {
+                        val share = totalAmount / equalParticipants.size
+                        Text(
+                            "$currencySymbol${"%.2f".format(share)} each \u00d7 ${equalParticipants.size} " +
+                                    if (equalParticipants.size == 1) "person" else "people",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    } else {
+                        Text(
+                            "Select at least one person",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+                SplitMode.MANUAL -> {
+                    members.forEach { (uid, name) ->
+                        OutlinedTextField(
+                            value = splitValues[uid] ?: "",
+                            onValueChange = { value -> onSplitValuesChange(splitValues + (uid to value)) },
+                            label = { Text(name) },
+                            prefix = { Text(currencySymbol) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    val allocated = splitValues.values.sumOf { it.toDoubleOrNull() ?: 0.0 }
+                    val remaining = totalAmount - allocated
+                    val isBalanced = abs(remaining) <= 0.01
+                    Text(
+                        if (isBalanced) {
+                            "Allocated $currencySymbol${"%.2f".format(allocated)} of $currencySymbol${"%.2f".format(totalAmount)} \u2713"
+                        } else {
+                            "Allocated $currencySymbol${"%.2f".format(allocated)} of $currencySymbol${"%.2f".format(totalAmount)}" +
+                                " ($currencySymbol${"%.2f".format(remaining)} left)"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isBalanced) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                    )
+                }
+                SplitMode.ON_ME -> {
+                    Text(
+                        "Full amount stays with the payer \u2014 not shared with the group",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
     }
 }
 
 /**
- * True once a custom split (if enabled) is internally consistent: every
- * member has a valid number and they sum to the expense total. Used to gate
- * the Save button so an unbalanced manual split can't be submitted.
+ * True once the current split mode's inputs are internally consistent and
+ * safe to save: EQUAL needs at least one person checked, MANUAL needs every
+ * member's amount to parse and sum to the expense total, ON_ME is always
+ * valid. Used to gate the Save button.
  */
-fun isSplitValid(useCustom: Boolean, totalAmount: Double, splitValues: Map<String, String>): Boolean {
-    if (!useCustom) return true
-    if (splitValues.values.any { it.toDoubleOrNull() == null }) return false
-    val allocated = splitValues.values.sumOf { it.toDoubleOrNull() ?: 0.0 }
-    return abs(totalAmount - allocated) <= 0.01
+fun isSplitValid(
+    mode: SplitMode,
+    totalAmount: Double,
+    equalParticipants: Set<String>,
+    splitValues: Map<String, String>
+): Boolean = when (mode) {
+    SplitMode.ON_ME -> true
+    SplitMode.EQUAL -> equalParticipants.isNotEmpty()
+    SplitMode.MANUAL -> {
+        if (splitValues.values.any { it.toDoubleOrNull() == null }) {
+            false
+        } else {
+            val allocated = splitValues.values.sumOf { it.toDoubleOrNull() ?: 0.0 }
+            abs(totalAmount - allocated) <= 0.01
+        }
+    }
 }
 
-/** Converts SplitEditor's text-field state into the Map<String, Double> Expense.splitAmong expects, or empty if not using a custom split. */
-fun resolveSplitAmong(useCustom: Boolean, splitValues: Map<String, String>): Map<String, Double> {
-    if (!useCustom) return emptyMap()
-    return splitValues.mapNotNull { (uid, text) -> text.toDoubleOrNull()?.let { uid to it } }.toMap()
+/**
+ * Converts SplitEditor's state into the Map<String, Double> Expense.splitAmong
+ * expects. Unlike the old "empty means equal split among current members"
+ * behavior, EQUAL now always resolves to concrete per-member amounts here --
+ * so the split is locked in at save time and stays correct even if the
+ * group's membership changes later (see SplitMode.kt).
+ */
+fun resolveSplitAmong(
+    mode: SplitMode,
+    payerUid: String,
+    totalAmount: Double,
+    equalParticipants: Set<String>,
+    splitValues: Map<String, String>
+): Map<String, Double> = when (mode) {
+    SplitMode.ON_ME -> mapOf(payerUid to totalAmount)
+    SplitMode.MANUAL -> splitValues.mapNotNull { (uid, text) -> text.toDoubleOrNull()?.let { uid to it } }.toMap()
+    SplitMode.EQUAL -> {
+        if (equalParticipants.isEmpty()) {
+            emptyMap()
+        } else {
+            val share = totalAmount / equalParticipants.size
+            equalParticipants.associateWith { share }
+        }
+    }
 }
 
 /**

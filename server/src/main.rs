@@ -1,8 +1,18 @@
+#![windows_subsystem = "windows"]
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::sync::{Arc, Mutex};
 use tiny_http::{Method, Response, Server, StatusCode};
+use windows_service::{
+    service::{
+        ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus,
+        ServiceType,
+    },
+    service_control_handler::{self, ServiceControlHandlerResult},
+    service_dispatcher,
+};
 
 const FCM_SCOPE: &str = "https://www.googleapis.com/auth/firebase.messaging";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
@@ -188,7 +198,12 @@ fn handle_notify(state: &AppState, mut request: tiny_http::Request) {
     let auth_ok = request
         .headers()
         .iter()
-        .find(|h| h.field.as_str().as_str().eq_ignore_ascii_case("Authorization"))
+        .find(|h| {
+            h.field
+                .as_str()
+                .as_str()
+                .eq_ignore_ascii_case("Authorization")
+        })
         .map(|h| h.value.as_str() == format!("Bearer {}", state.shared_secret))
         .unwrap_or(false);
 
@@ -258,10 +273,37 @@ fn json_response<T: Serialize>(status: StatusCode, body: &T) -> Response<std::io
         )
 }
 
-fn main() {
+// 1. Define the service entry point macro
+windows_service::define_windows_service!(ffi_service_main, my_service_main);
+
+// 2. The ACTUAL service entry point called by Windows
+fn my_service_main(_arguments: Vec<OsString>) {
+    // First, register the control handler
+    let event_handler = move |control_event| -> ServiceControlHandlerResult {
+        match control_event {
+            ServiceControl::Stop | ServiceControl::Shutdown => {
+                log::info!("Received stop signal, shutting down...");
+                std::process::exit(0);
+            }
+            _ => ServiceControlHandlerResult::NoError,
+        }
+    };
+
+    let status_handle = service_control_handler::register("MyServer", event_handler)
+        .expect("Failed to register service control handler");
+
+    // 1. Change to the correct directory
+    let exe_path = std::env::current_exe().expect("Failed to get executable path");
+    let exe_dir = exe_path
+        .parent()
+        .expect("Failed to get executable directory");
+    std::env::set_current_dir(exe_dir).expect("Failed to set working directory");
+
+    // 2. Load .env
     dotenvy::dotenv().ok();
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
+    // 3. Read configuration
     let port: u16 = std::env::var("PORT")
         .unwrap_or_else(|_| "8080".into())
         .parse()
@@ -283,18 +325,32 @@ fn main() {
         cached_token: Mutex::new(None),
     });
 
+    // 4. Create the server
     let server = Server::http(("0.0.0.0", port)).expect("failed to bind server");
     log::info!("listening on 0.0.0.0:{port}");
 
-    // A small fixed pool of worker threads pulling requests off the shared
-    // listener -- plenty for a low-traffic internal webhook, no async runtime
-    // needed.
+    // 5. Tell Windows the service is now RUNNING
+    let status = ServiceStatus {
+        service_type: ServiceType::OWN_PROCESS,
+        current_state: ServiceState::Running,
+        controls_accepted: ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN,
+        exit_code: ServiceExitCode::Win32(0),
+        checkpoint: 0,
+        wait_hint: std::time::Duration::from_secs(0),
+        process_id: Some(std::process::id()),
+    };
+
+    if let Err(e) = status_handle.set_service_status(status) {
+        log::error!("Failed to set service status: {}", e);
+        return;
+    }
+
+    // 6. Start worker threads
     let server = Arc::new(server);
-    let mut handles = Vec::new();
     for _ in 0..4 {
         let server = Arc::clone(&server);
         let state = Arc::clone(&state);
-        handles.push(std::thread::spawn(move || loop {
+        std::thread::spawn(move || loop {
             match server.recv() {
                 Ok(request) => {
                     let method = request.method().clone();
@@ -320,9 +376,21 @@ fn main() {
                     break;
                 }
             }
-        }));
+        });
     }
-    for h in handles {
-        let _ = h.join();
+
+    log::info!("Service started successfully on port {}", port);
+
+    // 7. Keep the main thread alive
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(60));
     }
+}
+
+// 3. In main(), register with SCM
+fn main() -> Result<(), windows_service::Error> {
+    // Important: service_dispatcher::start() blocks until the service stops
+    // and must be called FIRST
+    service_dispatcher::start("MyServer", ffi_service_main)?;
+    Ok(())
 }

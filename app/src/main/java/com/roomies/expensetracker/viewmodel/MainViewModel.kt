@@ -10,13 +10,16 @@ import com.roomies.expensetracker.data.AuthManager
 import com.roomies.expensetracker.data.FirestoreRepository
 import com.roomies.expensetracker.data.GroupPreference
 import com.roomies.expensetracker.model.AppSettings
+import com.roomies.expensetracker.model.BalanceDetail
 import com.roomies.expensetracker.model.Expense
 import com.roomies.expensetracker.model.Group
+import com.roomies.expensetracker.model.ItemStat
 import com.roomies.expensetracker.model.Member
 import com.roomies.expensetracker.model.RecurringExpense
 import com.roomies.expensetracker.model.Settlement
 import com.roomies.expensetracker.model.ShoppingItem
 import com.roomies.expensetracker.model.SuggestedSettlement
+import com.roomies.expensetracker.model.isPersonalOnly
 import com.roomies.expensetracker.model.shareFor
 import com.roomies.expensetracker.util.DateUtils
 import com.roomies.expensetracker.util.NotificationHelper
@@ -280,13 +283,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { FirestoreRepository.removeMember(group.id, uid) }
     }
 
-    /** Generates a 72-hour invite code for the given group and returns it via callback. */
-    fun createInvite(groupId: String, onResult: (Result<String>) -> Unit) {
+    /**
+     * Generates a 72-hour invite code for the given group and returns it via
+     * callback. [liableForThisMonth] decides, up front, whether whoever joins
+     * with this code will be retroactively included in this month's
+     * Equal-split expenses or excluded from them -- see
+     * FirestoreRepository.createInvite / applyMonthLiabilityForNewMember.
+     */
+    fun createInvite(groupId: String, liableForThisMonth: Boolean, onResult: (Result<String>) -> Unit) {
         val uid = AuthManager.currentUser.value?.uid
             ?: return onResult(Result.failure(IllegalStateException("Not signed in")))
         viewModelScope.launch {
             try {
-                val code = FirestoreRepository.createInvite(groupId, uid)
+                val code = FirestoreRepository.createInvite(groupId, uid, liableForThisMonth)
                 onResult(Result.success(code))
             } catch (e: Exception) {
                 onResult(Result.failure(e))
@@ -377,6 +386,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     it.recurringId == template.id && DateUtils.monthYearKey(it.dateMillis) == currentKey
                 }
                 if (!alreadyExists) {
+                    val memberUids = activeGroup.value?.members ?: emptyList()
+                    val splitAmong = if (memberUids.isEmpty()) {
+                        emptyMap()
+                    } else {
+                        val share = template.amount / memberUids.size
+                        memberUids.associateWith { share }
+                    }
                     FirestoreRepository.addExpense(
                         groupId,
                         Expense(
@@ -387,7 +403,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                             paidBy = template.paidBy,
                             dateMillis = DateUtils.millisForDayInMonth(now, template.dayOfMonth),
                             notes = "Auto-generated recurring expense",
-                            recurringId = template.id
+                            recurringId = template.id,
+                            splitAmong = splitAmong
                         )
                     )
                 }
@@ -408,6 +425,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun byPersonOf(expenses: List<Expense>): Map<String, Double> =
         expenses.groupBy { it.paidBy }
+            .mapValues { entry -> entry.value.sumOf { it.amount } }
+
+    /**
+     * Same as [byPersonOf] but excludes "this is on me" expenses (a custom
+     * split where the payer kept the whole amount) -- so this reflects only
+     * spending that was actually shared with the group.
+     */
+    fun byPersonSharedOf(expenses: List<Expense>): Map<String, Double> =
+        expenses.filterNot { it.isPersonalOnly }
+            .groupBy { it.paidBy }
             .mapValues { entry -> entry.value.sumOf { it.amount } }
 
     fun byCategoryOf(expenses: List<Expense>): Map<String, Double> =
@@ -431,6 +458,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             .toList()
             .sortedByDescending { it.second }
             .take(limit)
+
+    /** Per-item amount + frequency together, for the sortable Top Items table. */
+    fun topItemStatsOf(expenses: List<Expense>): List<ItemStat> =
+        expenses.groupBy { it.item }
+            .map { (item, list) -> ItemStat(item = item, amount = list.sumOf { it.amount }, count = list.size) }
+
+    /**
+     * Per-member paid vs. share breakdown behind a balance, so the UI can
+     * show group members how the number was actually calculated (e.g.
+     * "paid ₹1200, share ₹800 of ₹2400 split equally among 3 members").
+     * Honors any custom splitAmong via Expense.shareFor, same as
+     * computeExpenseBalances.
+     */
+    fun balanceDetailsOf(expenses: List<Expense>): Map<String, BalanceDetail> {
+        val memberUids = activeGroup.value?.members ?: return emptyMap()
+        if (memberUids.isEmpty()) return emptyMap()
+        return memberUids.associateWith { uid ->
+            val paid = expenses.filter { it.paidBy == uid }.sumOf { it.amount }
+            val share = expenses.sumOf { it.shareFor(uid, memberUids) }
+            BalanceDetail(paid = paid, share = share, net = paid - share)
+        }
+    }
 
     /**
      * Shared balance math used by both the monthly report and the lifetime

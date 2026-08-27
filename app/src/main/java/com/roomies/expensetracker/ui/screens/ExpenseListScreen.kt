@@ -39,11 +39,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.roomies.expensetracker.data.AuthManager
 import com.roomies.expensetracker.model.Expense
 import com.roomies.expensetracker.model.canManagePayers
+import com.roomies.expensetracker.model.inferredSplitMode
 import com.roomies.expensetracker.util.Constants
 import com.roomies.expensetracker.util.DateUtils
 import com.roomies.expensetracker.viewmodel.MainViewModel
@@ -98,6 +100,22 @@ fun ExpensesListScreen(viewModel: MainViewModel) {
                 label = { Text("Search by item, category, or person") },
                 modifier = Modifier.fillMaxWidth()
             )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    "${filtered.size} expense${if (filtered.size == 1) "" else "s"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "Total: Rs. ${"%.2f".format(filtered.sumOf { it.amount })}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium
+                )
+            }
             Spacer(modifier = Modifier.height(8.dp))
 
             if (filtered.isEmpty()) {
@@ -184,7 +202,16 @@ fun EditExpenseDialog(
     var paidBy by remember { mutableStateOf(expense.paidBy) }
     var notes by remember { mutableStateOf(expense.notes) }
     var selectedDateMillis by remember { mutableLongStateOf(expense.dateMillis) }
-    var useCustomSplit by remember { mutableStateOf(expense.splitAmong.isNotEmpty()) }
+    var splitMode by remember { mutableStateOf(expense.inferredSplitMode()) }
+    var equalParticipants by remember {
+        mutableStateOf(
+            if (expense.splitAmong.isEmpty()) {
+                members.map { it.first }.toSet()
+            } else {
+                expense.splitAmong.filterValues { it > 0.01 }.keys
+            }
+        )
+    }
     var splitValues by remember {
         mutableStateOf(expense.splitAmong.mapValues { (_, v) -> v.toString() })
     }
@@ -197,7 +224,7 @@ fun EditExpenseDialog(
         onDismissRequest = onDismiss,
         title = { Text("Edit Expense") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 OutlinedTextField(
                     value = amount,
                     onValueChange = { amount = it },
@@ -215,11 +242,6 @@ fun EditExpenseDialog(
                     label = "Date (BS)",
                     selectedMillis = selectedDateMillis,
                     onDateSelected = { selectedDateMillis = it }
-                )
-                Text(
-                    "AD: ${DateUtils.formatDate(selectedDateMillis)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 DropdownField("Category", Constants.CATEGORIES, category) { category = it }
                 DropdownField("Payment Method", Constants.PAYMENT_METHODS, paymentMethod) { paymentMethod = it }
@@ -239,8 +261,10 @@ fun EditExpenseDialog(
                         members = members,
                         totalAmount = amount.toDoubleOrNull() ?: 0.0,
                         currencySymbol = settings.currencySymbol,
-                        useCustom = useCustomSplit,
-                        onUseCustomChange = { useCustomSplit = it },
+                        mode = splitMode,
+                        onModeChange = { splitMode = it },
+                        equalParticipants = equalParticipants,
+                        onEqualParticipantsChange = { equalParticipants = it },
                         splitValues = splitValues,
                         onSplitValuesChange = { splitValues = it }
                     )
@@ -264,7 +288,8 @@ fun EditExpenseDialog(
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 val amt = amount.toDoubleOrNull()
-                val splitOk = !canEditSplit || isSplitValid(useCustomSplit, amt ?: 0.0, splitValues)
+                val effectivePaidBy = if (canChoosePayer) paidBy else expense.paidBy
+                val splitOk = !canEditSplit || isSplitValid(splitMode, amt ?: 0.0, equalParticipants, splitValues)
                 Button(
                     onClick = {
                         if (amt != null && amt > 0 && item.isNotBlank()) {
@@ -273,10 +298,14 @@ fun EditExpenseDialog(
                                 item = item.trim(),
                                 category = category,
                                 paymentMethod = paymentMethod,
-                                paidBy = if (canChoosePayer) paidBy else expense.paidBy,
+                                paidBy = effectivePaidBy,
                                 dateMillis = selectedDateMillis,
                                 notes = notes.trim(),
-                                splitAmong = if (canEditSplit) resolveSplitAmong(useCustomSplit, splitValues) else expense.splitAmong
+                                splitAmong = if (canEditSplit) {
+                                    resolveSplitAmong(splitMode, effectivePaidBy, amt, equalParticipants, splitValues)
+                                } else {
+                                    expense.splitAmong
+                                }
                             )
                             viewModel.updateExpense(updated)
                             onSaved(updated)

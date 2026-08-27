@@ -26,3 +26,15 @@ fun Expense.shareFor(uid: String, groupMemberUids: List<String>): Double = when 
     groupMemberUids.isNotEmpty() -> amount / groupMemberUids.size
     else -> 0.0
 }
+
+/**
+ * True for a "this is on me" expense: nobody but the payer has a nonzero
+ * share, so nothing is actually owed to the group for it. Ignores
+ * zero-value entries -- a manual split where everyone else was typed as 0
+ * counts as personal too, not just the explicit "On Me" mode.
+ */
+val Expense.isPersonalOnly: Boolean
+    get() {
+        val nonZeroKeys = splitAmong.filterValues { it > 0.01 }.keys
+        return nonZeroKeys.isNotEmpty() && nonZeroKeys.singleOrNull() == paidBy
+    }

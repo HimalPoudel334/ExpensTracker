@@ -3,6 +3,7 @@ package com.roomies.expensetracker.ui.screens
 import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +20,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
@@ -65,7 +68,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.roomies.expensetracker.data.AuthManager
+import com.roomies.expensetracker.model.BalanceDetail
 import com.roomies.expensetracker.model.Expense
+import com.roomies.expensetracker.model.ItemStat
 import com.roomies.expensetracker.model.SuggestedSettlement
 import com.roomies.expensetracker.model.canManagePayers
 import com.roomies.expensetracker.util.CsvExporter
@@ -127,11 +132,13 @@ fun ReportsScreen(viewModel: MainViewModel) {
 
     val total = viewModel.totalOf(periodExpenses)
     val byPerson = viewModel.byPersonOf(periodExpenses).mapKeys { memberNames[it.key] ?: it.key }
+    val byPersonShared = viewModel.byPersonSharedOf(periodExpenses).mapKeys { memberNames[it.key] ?: it.key }
     val byCategory = viewModel.byCategoryOf(periodExpenses)
     val byPayment = viewModel.byPaymentMethodOf(periodExpenses)
-    val topByAmount = viewModel.topItemsByAmountOf(periodExpenses)
-    val topByFrequency = viewModel.topItemsByFrequencyOf(periodExpenses)
+    val itemStats = viewModel.topItemStatsOf(periodExpenses)
     val periodBalances = viewModel.balancesOf(periodExpenses)
+    val periodBalanceDetails = viewModel.balanceDetailsOf(periodExpenses)
+    val memberCount = activeGroup?.members?.size ?: 0
 
     Column(
         modifier = Modifier
@@ -216,36 +223,23 @@ fun ReportsScreen(viewModel: MainViewModel) {
                 BreakdownBarList(byPerson, total, settings.currencySymbol)
             }
 
+            ReportSection(title = "Shared Expenses by Person", icon = Icons.Filled.Person) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Excludes \u201cthis is on me\u201d expenses that were never split with the group",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    BreakdownBarList(byPersonShared, byPersonShared.values.sum(), settings.currencySymbol)
+                }
+            }
+
             ReportSection(title = "By Payment Method", icon = Icons.Filled.Payments) {
                 BreakdownBarList(byPayment, total, settings.currencySymbol)
             }
 
             ReportSection(title = "Top Items", icon = Icons.Filled.Star) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        "By Amount", style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    if (topByAmount.isEmpty()) {
-                        Text("No data", style = MaterialTheme.typography.bodyMedium)
-                    } else {
-                        topByAmount.forEachIndexed { index, (item, amt) ->
-                            RankedRow(index + 1, item, "${settings.currencySymbol} ${"%.2f".format(amt)}")
-                        }
-                    }
-                    HorizontalDivider()
-                    Text(
-                        "By Frequency", style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    if (topByFrequency.isEmpty()) {
-                        Text("No data", style = MaterialTheme.typography.bodyMedium)
-                    } else {
-                        topByFrequency.forEachIndexed { index, (item, count) ->
-                            RankedRow(index + 1, item, "$count time(s)")
-                        }
-                    }
-                }
+                SortableItemsTable(stats = itemStats, currencySymbol = settings.currencySymbol)
             }
 
             ReportSection(title = "Balances This Period", icon = Icons.Filled.AccountBalanceWallet) {
@@ -256,9 +250,20 @@ fun ReportsScreen(viewModel: MainViewModel) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            "Each expense is split equally among all $memberCount current " +
+                                "members by default (a custom split is used instead wherever one was set).",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                         periodBalances.entries.sortedByDescending { it.value }.forEach { (uid, balance) ->
-                            BalanceRow(memberNames[uid] ?: uid, balance, settings.currencySymbol)
+                            BalanceRow(
+                                name = memberNames[uid] ?: uid,
+                                balance = balance,
+                                currencySymbol = settings.currencySymbol,
+                                detail = periodBalanceDetails[uid]
+                            )
                         }
                     }
                 }
@@ -487,37 +492,117 @@ private fun BreakdownBarList(data: Map<String, Double>, total: Double, currencyS
     }
 }
 
+private enum class ItemSortColumn { ITEM, AMOUNT, COUNT }
+
+/**
+ * Merges the old "Top Items by Amount" / "Top Items by Frequency" lists into
+ * one table. Tap a header to sort by that column, like clicking a column
+ * header in a web datatable; tap the same header again to flip direction.
+ */
 @Composable
-private fun RankedRow(rank: Int, label: String, valueText: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Surface(
-                shape = RoundedCornerShape(50),
-                color = MaterialTheme.colorScheme.secondaryContainer,
-                modifier = Modifier.width(24.dp).height(24.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        "$rank",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.width(10.dp))
-            Text(label, style = MaterialTheme.typography.bodyMedium)
+private fun SortableItemsTable(stats: List<ItemStat>, currencySymbol: String) {
+    var sortColumn by remember { mutableStateOf(ItemSortColumn.AMOUNT) }
+    var ascending by remember { mutableStateOf(false) }
+
+    fun toggleSort(column: ItemSortColumn) {
+        if (sortColumn == column) ascending = !ascending else {
+            sortColumn = column
+            ascending = false
         }
-        Text(valueText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+
+    val sorted = remember(stats, sortColumn, ascending) {
+        val base = when (sortColumn) {
+            ItemSortColumn.ITEM -> stats.sortedBy { it.item.lowercase() }
+            ItemSortColumn.AMOUNT -> stats.sortedBy { it.amount }
+            ItemSortColumn.COUNT -> stats.sortedBy { it.count }
+        }
+        if (ascending) base else base.reversed()
+    }
+
+    if (stats.isEmpty()) {
+        Text("No data", style = MaterialTheme.typography.bodyMedium)
+        return
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            SortableHeaderCell(
+                label = "Item",
+                modifier = Modifier.weight(1f),
+                active = sortColumn == ItemSortColumn.ITEM,
+                ascending = ascending,
+                onClick = { toggleSort(ItemSortColumn.ITEM) }
+            )
+            SortableHeaderCell(
+                label = "Amount",
+                modifier = Modifier.width(96.dp),
+                active = sortColumn == ItemSortColumn.AMOUNT,
+                ascending = ascending,
+                onClick = { toggleSort(ItemSortColumn.AMOUNT) }
+            )
+            SortableHeaderCell(
+                label = "Times",
+                modifier = Modifier.width(56.dp),
+                active = sortColumn == ItemSortColumn.COUNT,
+                ascending = ascending,
+                onClick = { toggleSort(ItemSortColumn.COUNT) }
+            )
+        }
+        HorizontalDivider()
+        sorted.forEach { stat ->
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(stat.item, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "$currencySymbol ${"%.2f".format(stat.amount)}",
+                    modifier = Modifier.width(96.dp),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text("${stat.count}", modifier = Modifier.width(56.dp), style = MaterialTheme.typography.bodyMedium)
+            }
+        }
     }
 }
 
 @Composable
-private fun BalanceRow(name: String, balance: Double, currencySymbol: String) {
+private fun SortableHeaderCell(
+    label: String,
+    modifier: Modifier = Modifier,
+    active: Boolean,
+    ascending: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = modifier.clickable(onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = if (active) FontWeight.Bold else FontWeight.Normal
+        )
+        if (active) {
+            Icon(
+                if (ascending) Icons.Filled.ArrowUpward else Icons.Filled.ArrowDownward,
+                contentDescription = if (ascending) "Sorted ascending" else "Sorted descending",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.width(14.dp).height(14.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun BalanceRow(
+    name: String,
+    balance: Double,
+    currencySymbol: String,
+    detail: BalanceDetail? = null
+) {
     val (label, containerColor, contentColor) = when {
         balance > 0.5 -> Triple(
             "is owed $currencySymbol ${"%.2f".format(balance)}",
@@ -540,13 +625,24 @@ private fun BalanceRow(name: String, balance: Double, currencySymbol: String) {
         color = containerColor,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(name, style = MaterialTheme.typography.bodyMedium, color = contentColor, fontWeight = FontWeight.Medium)
-            Text(label, style = MaterialTheme.typography.bodyMedium, color = contentColor)
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(name, style = MaterialTheme.typography.bodyMedium, color = contentColor, fontWeight = FontWeight.Medium)
+                Text(label, style = MaterialTheme.typography.bodyMedium, color = contentColor)
+            }
+            if (detail != null) {
+                Text(
+                    "paid $currencySymbol ${"%.2f".format(detail.paid)} \u2212 " +
+                        "share $currencySymbol ${"%.2f".format(detail.share)} = " +
+                        "$currencySymbol ${"%.2f".format(detail.net)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = contentColor.copy(alpha = 0.8f)
+                )
+            }
         }
     }
 }

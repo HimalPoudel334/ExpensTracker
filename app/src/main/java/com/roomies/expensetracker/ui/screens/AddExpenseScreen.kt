@@ -33,6 +33,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.roomies.expensetracker.data.AuthManager
 import com.roomies.expensetracker.model.Expense
+import com.roomies.expensetracker.model.SplitMode
 import com.roomies.expensetracker.model.canManagePayers
 import com.roomies.expensetracker.util.Constants
 import com.roomies.expensetracker.util.DateUtils
@@ -64,7 +65,8 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
     var selectedDateMillis by remember { mutableLongStateOf(DateUtils.todayLocalNoon()) }
     var showDatePicker by remember { mutableStateOf(false) }
     var showConfirmation by remember { mutableStateOf(false) }
-    var useCustomSplit by remember { mutableStateOf(false) }
+    var splitMode by remember { mutableStateOf(SplitMode.EQUAL) }
+    var equalParticipants by remember { mutableStateOf<Set<String>>(emptySet()) }
     var splitValues by remember { mutableStateOf(emptyMap<String, String>()) }
     val amountFocusRequester = remember { FocusRequester() }
 
@@ -72,6 +74,15 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
     // creator/admin can additionally edit anyone's split (matching their
     // "Paid By" override privilege).
     val canEditSplit = canChoosePayer || paidBy == currentUid
+
+    // Default the Equal-split checklist to "everyone currently in the
+    // group" whenever the member list changes, as long as the user hasn't
+    // moved off Equal mode. Doesn't touch a mid-edit manual customization.
+    LaunchedEffect(members) {
+        if (splitMode == SplitMode.EQUAL) {
+            equalParticipants = members.map { it.first }.toSet()
+        }
+    }
 
     // Pre-fill from shopping list if navigated from "Add as Expense". Only a
     // privileged (creator/admin) user gets the item's original payer carried
@@ -116,7 +127,7 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text("Add Expense", style = MaterialTheme.typography.headlineSmall)
 
@@ -161,11 +172,6 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
             },
             modifier = Modifier.fillMaxWidth()
         )
-        Text(
-            "AD: ${DateUtils.formatDate(selectedDateMillis)}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
 
         DropdownField(
             label = "Category",
@@ -203,8 +209,10 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
                 members = members,
                 totalAmount = amountFieldValue.text.toDoubleOrNull() ?: 0.0,
                 currencySymbol = settings.currencySymbol,
-                useCustom = useCustomSplit,
-                onUseCustomChange = { useCustomSplit = it },
+                mode = splitMode,
+                onModeChange = { splitMode = it },
+                equalParticipants = equalParticipants,
+                onEqualParticipantsChange = { equalParticipants = it },
                 splitValues = splitValues,
                 onSplitValuesChange = { splitValues = it }
             )
@@ -218,7 +226,8 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
         )
 
         val amt = amountFieldValue.text.toDoubleOrNull()
-        val splitOk = !canEditSplit || isSplitValid(useCustomSplit, amt ?: 0.0, splitValues)
+        val effectivePaidBy = if (canChoosePayer) paidBy else currentUid
+        val splitOk = !canEditSplit || isSplitValid(splitMode, amt ?: 0.0, equalParticipants, splitValues)
 
         Button(
             onClick = {
@@ -229,10 +238,14 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
                             item = item.trim(),
                             category = category,
                             paymentMethod = paymentMethod,
-                            paidBy = if (canChoosePayer) paidBy else currentUid,
+                            paidBy = effectivePaidBy,
                             dateMillis = selectedDateMillis,
                             notes = notes.trim(),
-                            splitAmong = if (canEditSplit) resolveSplitAmong(useCustomSplit, splitValues) else emptyMap()
+                            splitAmong = if (canEditSplit) {
+                                resolveSplitAmong(splitMode, effectivePaidBy, amt, equalParticipants, splitValues)
+                            } else {
+                                emptyMap()
+                            }
                         )
                     )
                     // Now that expense is saved, remove the shopping item it came from
@@ -244,7 +257,8 @@ fun AddExpenseScreen(viewModel: MainViewModel) {
                     item = ""
                     notes = ""
                     selectedDateMillis = DateUtils.todayLocalNoon()
-                    useCustomSplit = false
+                    splitMode = SplitMode.EQUAL
+                    equalParticipants = members.map { it.first }.toSet()
                     splitValues = emptyMap()
                     showConfirmation = true
                 }

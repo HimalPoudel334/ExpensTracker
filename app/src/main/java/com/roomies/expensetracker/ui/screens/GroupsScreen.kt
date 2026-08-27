@@ -36,7 +36,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -179,7 +178,9 @@ fun GroupsScreen(viewModel: MainViewModel) {
         InviteDialog(
             group = group,
             onDismiss = { groupToInvite = null },
-            onGenerate = { onDone -> viewModel.createInvite(group.id, onDone) },
+            onGenerate = { liableForThisMonth, onDone ->
+                viewModel.createInvite(group.id, liableForThisMonth, onDone)
+            },
             onCopy = { code ->
                 scope.launch {
                     clipboard.setClipEntry(ClipEntry(android.content.ClipData.newPlainText("Invite code", code)))
@@ -310,22 +311,15 @@ private fun RenameGroupDialog(currentName: String, onDismiss: () -> Unit, onRena
 private fun InviteDialog(
     group: Group,
     onDismiss: () -> Unit,
-    onGenerate: ((Result<String>) -> Unit) -> Unit,
+    onGenerate: (Boolean, (Result<String>) -> Unit) -> Unit,
     onCopy: (String) -> Unit
 ) {
+    // Asked BEFORE any code is generated so it's the admin's decision alone --
+    // whoever joins with the code can't see or change this choice.
+    var liableForThisMonth by remember { mutableStateOf(false) }
     var code by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-
-    // Generate a code as soon as the dialog opens.
-    LaunchedEffect(group.id) {
-        loading = true
-        onGenerate { result ->
-            loading = false
-            result.onSuccess { code = it }
-            result.onFailure { error = it.message ?: "Couldn't create invite" }
-        }
-    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -333,9 +327,40 @@ private fun InviteDialog(
         text = {
             Column {
                 when {
-                    loading -> CircularProgressIndicator()
-                    error != null -> Text(error!!, color = MaterialTheme.colorScheme.error)
-                    code != null -> {
+                    code == null -> {
+                        Text(
+                            "Should whoever joins with this code share this month's " +
+                                "already-logged expenses, or only expenses from now on?",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = !liableForThisMonth,
+                                onClick = { liableForThisMonth = false }
+                            )
+                            Text("Only new expenses from now on")
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = liableForThisMonth,
+                                onClick = { liableForThisMonth = true }
+                            )
+                            Text("Include this month's shared expenses too")
+                        }
+                        if (loading) {
+                            CircularProgressIndicator(modifier = Modifier.padding(top = 8.dp))
+                        }
+                        error?.let {
+                            Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
+                        }
+                    }
+                    else -> {
                         Text(
                             "Share this code. It's valid for 72 hours and works for anyone who has it:",
                             style = MaterialTheme.typography.bodyMedium
@@ -350,13 +375,25 @@ private fun InviteDialog(
             }
         },
         confirmButton = {
-            TextButton(
-                onClick = { code?.let(onCopy) },
-                enabled = code != null
-            ) { Text("Copy") }
+            if (code == null) {
+                TextButton(
+                    onClick = {
+                        loading = true
+                        error = null
+                        onGenerate(liableForThisMonth) { result ->
+                            loading = false
+                            result.onSuccess { code = it }
+                            result.onFailure { error = it.message ?: "Couldn't create invite" }
+                        }
+                    },
+                    enabled = !loading
+                ) { Text("Generate Code") }
+            } else {
+                TextButton(onClick = { code?.let(onCopy) }) { Text("Copy") }
+            }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Close") }
+            TextButton(onClick = onDismiss) { Text(if (code == null) "Cancel" else "Close") }
         }
     )
 }

@@ -12,6 +12,9 @@ import com.roomies.expensetracker.model.ShoppingItem
 import com.roomies.expensetracker.model.Expense
 import com.roomies.expensetracker.model.RecurringExpense
 import com.roomies.expensetracker.model.Settlement
+import com.roomies.expensetracker.model.SplitMode
+import com.roomies.expensetracker.model.inferredSplitMode
+import com.roomies.expensetracker.util.DateUtils
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -161,14 +164,24 @@ object FirestoreRepository {
         return (1..length).map { chars.random() }.joinToString("")
     }
 
-    /** Creates a code valid for 72 hours that lets anyone who has it join this group. */
-    suspend fun createInvite(groupId: String, uid: String): String {
+    /**
+     * Creates a code valid for 72 hours that lets anyone who has it join this
+     * group. [liableForThisMonth] is the admin's call, made before the code
+     * is ever shared -- whoever joins with it can't change it themselves.
+     * true: they're retroactively added to this month's Equal-split expenses.
+     * false: this month's Equal-split expenses are locked to exclude them,
+     * even ones that were still relying on the legacy "split among current
+     * members" fallback (which would otherwise have auto-included them the
+     * moment they joined).
+     */
+    suspend fun createInvite(groupId: String, uid: String, liableForThisMonth: Boolean): String {
         val code = generateInviteCode()
         val expiresAt = Timestamp(java.util.Date(System.currentTimeMillis() + 72 * 3600_000L))
         val data = mapOf(
             "groupId" to groupId,
             "createdBy" to uid,
-            "expiresAt" to expiresAt
+            "expiresAt" to expiresAt,
+            "liableForThisMonth" to liableForThisMonth
         )
         invitesRef.document(code).set(data).await()
         return code
@@ -179,6 +192,9 @@ object FirestoreRepository {
      * members. The "joinCode" field written alongside is what the security rule
      * checks to confirm a real, unexpired invite for this exact group was used —
      * without it, anyone who merely knew a groupId could add themselves.
+     *
+     * Also applies the admin's liableForThisMonth choice from when the invite
+     * was created (see createInvite) -- the new member has no say in this.
      */
     suspend fun joinGroupByCode(code: String, uid: String): Result<String> {
         return try {
@@ -198,9 +214,69 @@ object FirestoreRepository {
                     "joinCode" to code
                 )
             ).await()
+            val liableForThisMonth = if (inviteSnap.contains("liableForThisMonth")) {
+                inviteSnap.getBoolean("liableForThisMonth")
+            } else {
+                null
+            }
+            if (liableForThisMonth != null) {
+                applyMonthLiabilityForNewMember(groupId, uid, liableForThisMonth)
+            }
             Result.success(groupId)
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    /**
+     * Retroactively locks this month's Equal-split expenses to either include
+     * or exclude [newUid], per the admin's choice at invite time. Manual and
+     * On-Me expenses are never touched -- those were deliberate per-expense
+     * choices, not "whoever's in the group".
+     *
+     * - liable=true: only expenses that already have a locked-in split need
+     *   updating (add newUid, recompute shares). Legacy expenses with an
+     *   empty splitAmong already fall back to splitting among ALL current
+     *   members, so they already include newUid automatically -- nothing to
+     *   do there.
+     * - liable=false: every Equal-split expense this month, including legacy
+     *   empty-split ones, gets an explicit split that excludes newUid --
+     *   otherwise a legacy one would silently start including them the
+     *   moment they join, via that same current-members fallback.
+     */
+    private suspend fun applyMonthLiabilityForNewMember(groupId: String, newUid: String, liable: Boolean) {
+        val currentKey = DateUtils.monthYearKey(System.currentTimeMillis())
+        val expenses = getExpensesOnce(groupId)
+        val thisMonthEqual = expenses.filter {
+            DateUtils.monthYearKey(it.dateMillis) == currentKey && it.inferredSplitMode() == SplitMode.EQUAL
+        }
+        if (thisMonthEqual.isEmpty()) return
+
+        val currentMembers = if (!liable) {
+            groupDoc(groupId).get().await().toObject(Group::class.java)?.members ?: emptyList()
+        } else {
+            emptyList()
+        }
+
+        thisMonthEqual.forEach { expense ->
+            val isEmptyLegacy = expense.splitAmong.isEmpty()
+            if (liable) {
+                if (isEmptyLegacy || expense.splitAmong.containsKey(newUid)) return@forEach
+                val participants = (expense.splitAmong.keys + newUid).toList()
+                val share = expense.amount / participants.size
+                updateExpense(groupId, expense.copy(splitAmong = participants.associateWith { share }))
+            } else {
+                val participants = if (isEmptyLegacy) {
+                    currentMembers.filter { it != newUid }
+                } else {
+                    expense.splitAmong.keys.filter { it != newUid }
+                }
+                if (participants.isEmpty() || (!isEmptyLegacy && !expense.splitAmong.containsKey(newUid))) {
+                    return@forEach
+                }
+                val share = expense.amount / participants.size
+                updateExpense(groupId, expense.copy(splitAmong = participants.associateWith { share }))
+            }
         }
     }
 
