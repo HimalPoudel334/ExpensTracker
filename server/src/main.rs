@@ -273,6 +273,22 @@ fn json_response<T: Serialize>(status: StatusCode, body: &T) -> Response<std::io
         )
 }
 
+/// Sets up flexi_logger writing to a rotating log file (`logs/` next to the
+/// exe). Kept as its own fallible function since `my_service_main`'s
+/// signature is fixed by `define_windows_service!` and can't return `Result`,
+/// so it can't use `?` directly -- this lets the `?`s live here instead.
+fn init_logger() -> Result<(), Box<dyn std::error::Error>> {
+    flexi_logger::Logger::try_with_env_or_str("info")?
+        .log_to_file(flexi_logger::FileSpec::default().directory("logs"))
+        .rotate(
+            flexi_logger::Criterion::Size(5_000_000),
+            flexi_logger::Naming::Timestamps,
+            flexi_logger::Cleanup::KeepLogFiles(5),
+        )
+        .start()?;
+    Ok(())
+}
+
 // 1. Define the service entry point macro
 windows_service::define_windows_service!(ffi_service_main, my_service_main);
 
@@ -301,7 +317,7 @@ fn my_service_main(_arguments: Vec<OsString>) {
 
     // 2. Load .env
     dotenvy::dotenv().ok();
-    env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
+    init_logger().expect("failed to initialize logger");
 
     // 3. Read configuration
     let port: u16 = std::env::var("PORT")

@@ -15,6 +15,7 @@ navigationCompose = "2.9.8"
 nepaliDatePicker = "3.0.0"
 credentials = "1.3.0"
 googleid = "1.1.1"
+workRuntimeKtx = "2.10.5"
 
 [libraries]
 androidx-compose-material-icons-extended = { module = "androidx.compose.material:material-icons-extended" }
@@ -43,6 +44,7 @@ nepali-date-picker-ui = { module = "io.github.shivathapaa:nepali-date-picker-ui"
 androidx-credentials = { group = "androidx.credentials", name = "credentials", version.ref = "credentials" }
 androidx-credentials-play-services-auth = { group = "androidx.credentials", name = "credentials-play-services-auth", version.ref = "credentials" }
 googleid = { group = "com.google.android.libraries.identity.googleid", name = "googleid", version.ref = "googleid" }
+androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "workRuntimeKtx" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

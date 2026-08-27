@@ -22,6 +22,7 @@ import com.roomies.expensetracker.data.AuthManager
  * at all -- which is the entire point of this class existing.
  */
 class FcmService : FirebaseMessagingService() {
+    @Suppress("OVERRIDE_DEPRECATION")
     override fun onNewToken(token: String) {
         super.onNewToken(token)
         val uid = AuthManager.currentUser.value?.uid ?: return

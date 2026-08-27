@@ -23,7 +23,7 @@ import com.roomies.expensetracker.model.isPersonalOnly
 import com.roomies.expensetracker.model.shareFor
 import com.roomies.expensetracker.util.DateUtils
 import com.roomies.expensetracker.util.NotificationHelper
-import com.roomies.expensetracker.util.PushNotifier
+import com.roomies.expensetracker.util.NotifyWorker
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -317,12 +317,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * Fans a push out to every current group member except [excludeUid]
      * (the person who just made the change -- no point notifying yourself).
-     * Fire-and-forget: failures are logged inside PushNotifier, never shown
-     * to the user, since this is purely the "your phone was closed" fallback
-     * on top of the live in-app notification that already covers everyone
-     * with the app open (see the listener setup above).
+     * Enqueued as WorkManager work (see [NotifyWorker]) rather than run
+     * inline in viewModelScope: viewModelScope is cancelled the instant the
+     * user backgrounds/closes the app, which is exactly when this needs to
+     * keep running, and WorkManager work isn't tied to that lifecycle.
+     * Failures are logged inside PushNotifier/NotifyWorker, never shown to
+     * the user, since this is purely the "your phone was closed" fallback on
+     * top of the live in-app notification that already covers everyone with
+     * the app open (see the listener setup above).
      */
-    private suspend fun notifyOtherMembers(
+    private fun notifyOtherMembers(
         excludeUid: String,
         title: String,
         body: String,
@@ -331,8 +335,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     ) {
         val otherUids = (activeGroup.value?.members ?: emptyList()).filter { it != excludeUid }
         if (otherUids.isEmpty()) return
-        val tokensByUid = FirestoreRepository.getFcmTokens(otherUids)
-        PushNotifier.notify(tokensByUid, title, body, channelId, data)
+        NotifyWorker.enqueue(context, otherUids, title, body, channelId, data)
     }
 
     fun addExpense(expense: Expense) {
