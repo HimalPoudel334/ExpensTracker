@@ -195,6 +195,8 @@ fn send_fcm(state: &AppState, access_token: &str, token: &str, req: &NotifyReque
 }
 
 fn handle_notify(state: &AppState, mut request: tiny_http::Request) {
+    log::info!("notify request received from {:?}", request.remote_addr());
+
     let auth_ok = request
         .headers()
         .iter()
@@ -208,6 +210,7 @@ fn handle_notify(state: &AppState, mut request: tiny_http::Request) {
         .unwrap_or(false);
 
     if !auth_ok {
+        log::warn!("notify request rejected: missing/invalid Authorization header");
         let _ = request.respond(json_response(
             StatusCode(401),
             &serde_json::json!({"error": "unauthorized"}),
@@ -217,6 +220,7 @@ fn handle_notify(state: &AppState, mut request: tiny_http::Request) {
 
     let mut body = String::new();
     if request.as_reader().read_to_string(&mut body).is_err() {
+        log::warn!("notify request rejected: failed to read body");
         let _ = request.respond(json_response(
             StatusCode(400),
             &serde_json::json!({"error": "failed to read body"}),
@@ -227,6 +231,7 @@ fn handle_notify(state: &AppState, mut request: tiny_http::Request) {
     let payload: NotifyRequest = match serde_json::from_str(&body) {
         Ok(p) => p,
         Err(e) => {
+            log::warn!("notify request rejected: invalid json: {e}");
             let _ = request.respond(json_response(
                 StatusCode(400),
                 &serde_json::json!({"error": format!("invalid json: {e}")}),
@@ -236,12 +241,20 @@ fn handle_notify(state: &AppState, mut request: tiny_http::Request) {
     };
 
     if payload.tokens.is_empty() {
+        log::warn!("notify request rejected: no tokens in payload");
         let _ = request.respond(json_response(
             StatusCode(400),
             &serde_json::json!({"error": "tokens required"}),
         ));
         return;
     }
+
+    log::info!(
+        "notify: {} token(s), title={:?}, channel={:?}",
+        payload.tokens.len(),
+        payload.title,
+        payload.channel_id
+    );
 
     let access_token = match get_access_token(state) {
         Ok(t) => t,
@@ -260,6 +273,18 @@ fn handle_notify(state: &AppState, mut request: tiny_http::Request) {
         .iter()
         .map(|token| send_fcm(state, &access_token, token, &payload))
         .collect();
+
+    let ok_count = results.iter().filter(|r| r.success).count();
+    log::info!("notify: {}/{} sends succeeded", ok_count, results.len());
+    for r in &results {
+        if !r.success {
+            log::warn!(
+                "notify: token ...{} failed: {:?}",
+                &r.token[r.token.len().saturating_sub(8)..],
+                r.error
+            );
+        }
+    }
 
     let _ = request.respond(json_response(StatusCode(200), &NotifyResponse { results }));
 }

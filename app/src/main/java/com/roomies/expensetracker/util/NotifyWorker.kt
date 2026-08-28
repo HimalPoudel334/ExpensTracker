@@ -15,7 +15,7 @@ import java.util.concurrent.TimeUnit
  * Runs [PushNotifier.notify] (token lookup + the call to the self-hosted
  * webhook) as WorkManager work instead of inside viewModelScope.
  *
- * Why this exists: viewModelScope is cancelled the moment the ViewModel is
+ * Why this exists: viewModelScope is canceled the moment the ViewModel is
  * cleared, which happens as soon as the user backgrounds or swipes away the
  * app right after adding an expense/item -- the exact moment this call needs
  * to survive. WorkManager schedules this as independent, OS-managed work
