@@ -24,6 +24,8 @@ import com.roomies.expensetracker.model.shareFor
 import com.roomies.expensetracker.util.DateUtils
 import com.roomies.expensetracker.util.NotificationHelper
 import com.roomies.expensetracker.util.NotifyWorker
+import com.roomies.expensetracker.util.ServerHealth
+import com.roomies.expensetracker.util.ServerHealthChecker
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -101,6 +103,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _pendingShoppingItem = MutableStateFlow<ShoppingItem?>(null)
     val pendingShoppingItem: StateFlow<ShoppingItem?> = _pendingShoppingItem.asStateFlow()
 
+    /** Notify-server reachability, shown to admins on Settings. Checked once at startup;
+     *  call [checkServerHealth] again for a manual refresh (e.g. tapping the indicator). */
+    private val _serverHealth = MutableStateFlow(ServerHealth.UNKNOWN)
+    val serverHealth: StateFlow<ServerHealth> = _serverHealth.asStateFlow()
+
+    fun checkServerHealth() {
+        viewModelScope.launch {
+            _serverHealth.value = ServerHealth.CHECKING
+            _serverHealth.value = ServerHealthChecker.check()
+        }
+    }
+
     /** IDs seen for the CURRENT group — reset whenever the active group changes, so switching
      *  groups doesn't treat that group's existing items as "new" and spam notifications. */
     private val seenShoppingIds = mutableSetOf<String>()
@@ -115,6 +129,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _selectedGroupId.value = user?.uid?.let { GroupPreference.getSelectedGroupId(context, it) }
             }
         }
+
+        checkServerHealth()
 
         val groupIdFlow = activeGroup.map { it?.id }
 
